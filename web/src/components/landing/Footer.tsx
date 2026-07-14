@@ -69,7 +69,7 @@ export function Footer() {
           viewport={{ once: true }}
         >
           <motion.a
-            href="#about"
+            href="/auth?mode=signup"
             className="px-6 py-3 rounded-full bg-white text-black font-medium text-sm inline-flex items-center gap-2"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}

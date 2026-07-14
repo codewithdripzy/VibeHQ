@@ -37,7 +37,7 @@ export function FeatureAgents() {
               progression, and autonomous decision-making.
             </p>
             <motion.a
-              href="#about"
+              href="/auth?mode=signup"
               className="inline-flex px-6 py-3 rounded-full bg-white text-black font-medium text-sm items-center gap-2"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
