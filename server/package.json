@@ -1,0 +1,50 @@
+{
+  "name": "vibehq-server",
+  "version": "1.0.0",
+  "description": "VibeHQ - Autonomous AI Company Operating System API",
+  "main": "dist/src/app.js",
+  "scripts": {
+    "start": "node dist/src/app.js",
+    "dev": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/app.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "jest"
+  },
+  "keywords": [
+    "ai-company",
+    "autonomous-agents",
+    "vibehq"
+  ],
+  "author": "VibeHQ",
+  "license": "ISC",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.8.0",
+    "joi": "^17.13.3",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.19.4",
+    "resend": "^6.12.3",
+    "typescript": "^5.9.2",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.23",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20.10.0",
+    "@types/uuid": "^11.0.0",
+    "nodemon": "^3.0.2",
+    "ts-node": "^10.9.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "bcrypt",
+      "protobufjs"
+    ]
+  }
+}
