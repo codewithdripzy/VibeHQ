@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Google_Sans_Flex, Stack_Sans_Notch } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { AuthProvider } from "@/contexts/auth.context";
+import { ToastProvider } from "@/contexts/toast.context";
 import "./globals.css";
 
 const googleSans = Google_Sans_Flex({
@@ -34,7 +36,9 @@ export default function RootLayout({
       className={`${googleSans.variable} ${stackSansNotch.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-black text-white font-sans">
-        {children}
+        <AuthProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </AuthProvider>
         <Analytics />
         <SpeedInsights />
       </body>
