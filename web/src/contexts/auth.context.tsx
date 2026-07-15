@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       const { user } = await promise;
       setUser(user);
-      router.push("/dashboard");
+      router.push("/companies");
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Something went wrong";
       setError(message);

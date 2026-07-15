@@ -1,8 +1,12 @@
 import { Router } from "express";
 import { createCrudRoutes } from "./crudRoutes";
 import { services } from "../services";
+import authRouter from "./auth.routes";
 
 const router = Router();
+
+// Auth
+router.use("/auth", authRouter);
 
 // Core entities
 router.use("/users", createCrudRoutes({ service: services.user }));
