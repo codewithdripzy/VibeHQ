@@ -336,7 +336,7 @@ const companySchema = new Schema(
 );
 
 companySchema.index({ owner: 1 });
-companySchema.index({ slug: 1 });
+
 companySchema.index({ status: 1 });
 
 export default companySchema;

@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
-import type { ToolDefinition, ToolContext, ToolResult } from '../registry.js';
-import { toolRegistry } from '../registry.js';
+import type { ToolDefinition, ToolContext, ToolResult } from '../registry';
+import { toolRegistry } from '../registry';
 
 const MAX_TIMEOUT_MS = 60_000;
 const DEFAULT_TIMEOUT_MS = 30_000;

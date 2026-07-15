@@ -1,5 +1,5 @@
-import type { ToolDefinition, ToolContext, ToolResult } from '../registry.js';
-import { toolRegistry } from '../registry.js';
+import type { ToolDefinition, ToolContext, ToolResult } from '../registry';
+import { toolRegistry } from '../registry';
 
 const BRAVE_SEARCH_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 

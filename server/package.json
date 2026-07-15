@@ -5,7 +5,7 @@
   "main": "dist/src/app.js",
   "scripts": {
     "start": "node dist/src/app.js",
-    "dev": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/app.ts",
+    "dev": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/server.ts",
     "build": "tsc -p tsconfig.json",
     "test": "jest"
   },
@@ -26,6 +26,7 @@
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.19.4",
+    "node-cron": "^4.6.0",
     "resend": "^6.12.3",
     "socket.io": "^4.8.3",
     "typescript": "^5.9.2",

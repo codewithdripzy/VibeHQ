@@ -1,8 +1,8 @@
-import { toolRegistry } from '../registry.js';
-import { registerWebSearch } from './webSearch.js';
-import { registerWebFetch } from './webFetch.js';
-import { registerCodeExec } from './codeExec.js';
-import { registerFileOps } from './fileOps.js';
+import { toolRegistry } from '../registry';
+import { registerWebSearch } from './webSearch';
+import { registerWebFetch } from './webFetch';
+import { registerCodeExec } from './codeExec';
+import { registerFileOps } from './fileOps';
 
 export function registerBuiltInTools(): void {
     registerWebSearch();
@@ -12,4 +12,4 @@ export function registerBuiltInTools(): void {
 }
 
 export { toolRegistry };
-export type { ToolDefinition, ToolContext, ToolResult } from '../registry.js';
+export type { ToolDefinition, ToolContext, ToolResult } from '../registry';

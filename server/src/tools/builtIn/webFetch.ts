@@ -1,5 +1,5 @@
-import type { ToolDefinition, ToolContext, ToolResult } from '../registry.js';
-import { toolRegistry } from '../registry.js';
+import type { ToolDefinition, ToolContext, ToolResult } from '../registry';
+import { toolRegistry } from '../registry';
 
 const MAX_BODY_BYTES = 1_024_000; // ~1 MB
 

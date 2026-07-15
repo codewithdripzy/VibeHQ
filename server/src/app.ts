@@ -1,3 +1,6 @@
+import { configDotenv } from "dotenv";
+configDotenv();
+
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
@@ -8,6 +11,7 @@ import { wsServer } from "./websocket/server";
 import { scheduler } from "./cron/scheduler";
 import { registerBuiltInTools } from "./tools/builtIn";
 import { getLLMRouter } from "./llm/router";
+import Database from "./config/database";
 
 const app = express();
 const httpServer = createServer(app);
@@ -30,8 +34,8 @@ app.use(errorHandler);
 
 // Initialize services
 async function init() {
-    const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/vibehq";
-    await mongoose.connect(MONGO_URI);
+    const db = new Database();
+    await db.getConnection();
     console.log("[DB] Connected to MongoDB");
 
     wsServer.init(httpServer);
@@ -47,6 +51,6 @@ async function init() {
     console.log("[LLM] Multi-model LLM router ready");
 }
 
-const PORT = parseInt(process.env.PORT || "3000");
+const PORT = parseInt(process.env.PORT || "3003");
 
 export { app, httpServer, init, PORT };

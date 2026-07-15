@@ -67,7 +67,6 @@ const userSchema = new Schema(
     { timestamps: true }
 );
 
-userSchema.index({ email: 1 });
-userSchema.index({ uid: 1 });
+
 
 export default userSchema;

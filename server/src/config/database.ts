@@ -26,7 +26,7 @@ class Database {
                 serverApi: { version: '1', strict: true, deprecationErrors: true }
             });
             
-            console.log('Successfully connected to the GetDistributed database');
+            console.log('Successfully connected to the VibeHQ database');
             return mongoose.connection;
         } catch (error) {
             console.error('Failed to connect to the database:', error);

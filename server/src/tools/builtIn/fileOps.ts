@@ -1,6 +1,6 @@
 import * as path from 'node:path';
-import type { ToolDefinition, ToolContext, ToolResult } from '../registry.js';
-import { toolRegistry } from '../registry.js';
+import type { ToolDefinition, ToolContext, ToolResult } from '../registry';
+import { toolRegistry } from '../registry';
 
 const WORKSPACE_PATH = process.env.TOOL_WORKSPACE_PATH ?? process.cwd();
 
