@@ -72,6 +72,7 @@ export class LLMRouter {
   ): Promise<LLMResponse> {
     const companyConfig = await this.loadCompanyConfig(companyId);
     const config = companyConfig || this.config;
+    const maxRetries = config.maxRetries ?? 2;
 
     const fallbackOrder = preferredProvider
       ? [preferredProvider, ...config.fallbackOrder.filter(p => p !== preferredProvider)]
@@ -90,18 +91,33 @@ export class LLMRouter {
         if (!isAvailable) {
           continue;
         }
-
-        const providerConfig = config.providers[providerType] || this.config.providers[providerType];
-        const response = await provider.chat(messages, {
-          temperature: providerConfig?.temperature,
-          maxTokens: providerConfig?.maxTokens,
-        } as any);
-
-        return response;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        console.error(`Provider ${providerType} failed for company ${companyId}:`, lastError.message);
+      } catch {
         continue;
+      }
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const providerConfig = config.providers[providerType] || this.config.providers[providerType];
+          const response = await provider.chat(messages, {
+            temperature: providerConfig?.temperature,
+            maxTokens: providerConfig?.maxTokens,
+          } as any);
+
+          return response;
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          const isLastAttempt = attempt === maxRetries;
+          console.error(
+            `Provider ${providerType} failed (attempt ${attempt + 1}/${maxRetries + 1}) for company ${companyId}:`,
+            lastError.message
+          );
+
+          if (!isLastAttempt) {
+            const backoff = Math.pow(2, attempt) * 500;
+            console.log(`Retrying ${providerType} in ${backoff}ms...`);
+            await new Promise(resolve => setTimeout(resolve, backoff));
+          }
+        }
       }
     }
 

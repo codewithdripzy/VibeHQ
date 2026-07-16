@@ -146,8 +146,9 @@ const brainstormSessionSchema = new Schema(
                 team: { type: String, required: true },  // "board", "engineering", "marketing", etc.
                 sender: { type: String, required: true },  // agent name/role
                 content: { type: String, required: true },
-                type: { type: String, enum: ["message", "delegation", "response", "system"], default: "message" },
+                type: { type: String, enum: ["message", "delegation", "response", "system", "typing"], default: "message" },
                 linkedDelegationTo: { type: String },  // if delegation, which team tab to link to
+                typing: { type: Boolean, default: false },  // if true, show as "X is typing..."
                 resources: [
                     {
                         type: { type: String, enum: ["document", "file", "image", "link", "code", "data"], required: true },

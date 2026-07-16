@@ -12,6 +12,7 @@ import { scheduler } from "./cron/scheduler";
 import { registerBuiltInTools } from "./tools/builtIn";
 import { getLLMRouter } from "./llm/router";
 import Database from "./config/database";
+import brainstormService from "./services/brainstorm.service";
 
 const app = express();
 const httpServer = createServer(app);
@@ -50,6 +51,9 @@ async function init() {
 
     registerBuiltInTools();
     console.log("[Tools] Built-in tools registered");
+
+    await brainstormService.resumeRunningSessions();
+    console.log("[Brainstorm] Running sessions resumed");
 
     console.log("[LLM] Multi-model LLM router ready");
 }
