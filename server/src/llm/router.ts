@@ -28,19 +28,21 @@ export interface CompanyLLMConfig {
 }
 
 const DEFAULT_FALLBACK_ORDER: ProviderType[] = [
+  "nvidia",
   "ollama",
   "groq",
   "huggingface",
   "google",
   "openai",
   "anthropic",
+  "fallback",
 ];
 
 const DEFAULT_CONFIG: LLMConfig = {
-  defaultProvider: "ollama",
+  defaultProvider: "nvidia",
   fallbackOrder: DEFAULT_FALLBACK_ORDER,
   providers: {},
-  timeout: 30000,
+  timeout: 60000,
   maxRetries: 2,
 };
 
@@ -54,7 +56,7 @@ export class LLMRouter {
   }
 
   private initializeProviders(): void {
-    const providerTypes: ProviderType[] = ["ollama", "huggingface", "groq", "openai", "anthropic", "google"];
+    const providerTypes: ProviderType[] = ["nvidia", "ollama", "huggingface", "groq", "openai", "anthropic", "google", "fallback"];
 
     for (const type of providerTypes) {
       const providerConfig = this.config.providers[type];

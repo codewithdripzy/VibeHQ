@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "@iconify/react";
 import { VibeHQLogo } from "@/components/landing/VibeHQLogo";
@@ -13,6 +14,7 @@ import { useToast } from "@/contexts/toast.context";
 export default function CompaniesPage() {
   const { user, logout } = useAuth();
   const { toast } = useToast();
+  const router = useRouter();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -21,6 +23,9 @@ export default function CompaniesPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [industry, setIndustry] = useState("");
+  const [mission, setMission] = useState("");
+  const [vision, setVision] = useState("");
+  const [values, setValues] = useState("");
   useEffect(() => {
     fetchCompanies();
   }, []);
@@ -41,7 +46,9 @@ export default function CompaniesPage() {
     setName("");
     setDescription("");
     setIndustry("");
-    setSelectedTeams(teams.filter((t) => t.compulsory).map((t) => t.id));
+    setMission("");
+    setVision("");
+    setValues("");
     setCreateStep(1);
   };
 
@@ -58,7 +65,7 @@ export default function CompaniesPage() {
     }
     setCreating(true);
     try {
-      const res = await companyService.createCompany({ name, description, industry });
+      const res = await companyService.createCompany({ name, description, industry, mission, vision, values: values.split(",").map((v) => v.trim()).filter(Boolean) });
       setCompanies((prev) => [...prev, res.data]);
       setShowCreate(false);
       resetCreate();
@@ -71,31 +78,6 @@ export default function CompaniesPage() {
     }
   };
 
-  const teams = [
-    { id: "executive", label: "Executive", desc: "CEO, COO, CTO, CPO, CMO, CFO", icon: "lucide:crown", compulsory: true },
-    { id: "engineering", label: "Engineering", desc: "Architects, backend, frontend, DevOps", icon: "lucide:code-2", compulsory: true },
-    { id: "product", label: "Product", desc: "PM, project management, scrum", icon: "lucide:layout-grid", compulsory: true },
-    { id: "design", label: "Design", desc: "UX research, UI, brand design", icon: "lucide:pen-tool", compulsory: false },
-    { id: "qa", label: "Quality Assurance", desc: "Manual & automation testing", icon: "lucide:shield-check", compulsory: false },
-    { id: "security", label: "Security", desc: "Pen testing, compliance, audits", icon: "lucide:lock", compulsory: false },
-    { id: "marketing", label: "Marketing", desc: "SEO, content, social, campaigns", icon: "lucide:megaphone", compulsory: false },
-    { id: "sales", label: "Sales", desc: "SDR, closing, customer success", icon: "lucide:trending-up", compulsory: false },
-    { id: "analytics", label: "Analytics", desc: "Product, revenue, growth analytics", icon: "lucide:bar-chart-3", compulsory: false },
-    { id: "legal", label: "Legal", desc: "Contracts, compliance, privacy", icon: "lucide:scale", compulsory: false },
-    { id: "finance", label: "Finance", desc: "Budget, invoicing, forecasting", icon: "lucide:wallet", compulsory: false },
-    { id: "support", label: "Customer Support", desc: "Tickets, knowledge base, FAQ", icon: "lucide:headphones", compulsory: false },
-  ];
-
-  const [selectedTeams, setSelectedTeams] = useState<string[]>(
-    teams.filter((t) => t.compulsory).map((t) => t.id)
-  );
-
-  const toggleTeam = (id: string, compulsory: boolean) => {
-    if (compulsory) return;
-    setSelectedTeams((prev) =>
-      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
-    );
-  };
 
   const statusColor = (status: Company["status"]) => {
     switch (status) {
@@ -213,6 +195,7 @@ export default function CompaniesPage() {
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.04 }}
+                    onClick={() => router.push(`/companies/${company._id}`)}
                     className="p-4 rounded-xl bg-[#111] border border-white/5 hover:border-white/15 transition-all cursor-pointer group"
                   >
                     <div className="flex items-center gap-3">
@@ -283,10 +266,10 @@ export default function CompaniesPage() {
               <div className="px-6 pt-6 pb-4 flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-semibold font-[family-name:var(--font-stack-sans-notch)]">
-                    {createStep === 1 ? "New Company" : "Starting team"}
+                    {createStep === 1 ? "New Company" : "Company Details"}
                   </h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {createStep === 1 ? "What's the name and focus?" : "How big is your team?"}
+                    {createStep === 1 ? "What's the name and focus?" : "Set your company's direction"}
                   </p>
                 </div>
                 <button
@@ -372,56 +355,37 @@ export default function CompaniesPage() {
                         className="space-y-3"
                       >
                         <p className="text-[11px] text-gray-600">
-                          <span className="text-gray-400">Required</span> teams are always included. Toggle optional teams on or off.
+                          Define your company's purpose. These help AI agents understand your goals.
                         </p>
-                        <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
-                          {teams.map((team) => {
-                            const isSelected = selectedTeams.includes(team.id);
-                            return (
-                              <button
-                                key={team.id}
-                                type="button"
-                                onClick={() => toggleTeam(team.id, team.compulsory)}
-                                disabled={team.compulsory}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
-                                  team.compulsory
-                                    ? "bg-white/5 border-white/10 cursor-default"
-                                    : isSelected
-                                      ? "bg-white/10 border-white/20 cursor-pointer"
-                                      : "bg-black border-white/5 hover:border-white/15 cursor-pointer"
-                                }`}
-                              >
-                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                                  isSelected ? "bg-white/15" : "bg-white/5"
-                                }`}>
-                                  <Icon
-                                    icon={team.icon}
-                                    className={`w-4 h-4 ${isSelected ? "text-white" : "text-gray-500"}`}
-                                  />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <p className={`text-xs font-medium ${isSelected ? "text-white" : "text-gray-400"}`}>
-                                      {team.label}
-                                    </p>
-                                    {team.compulsory && (
-                                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/10 text-gray-400 font-medium">
-                                        Required
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-[10px] text-gray-600 truncate">{team.desc}</p>
-                                </div>
-                                {!team.compulsory && (
-                                  <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
-                                    isSelected ? "bg-white border-white" : "border-white/20"
-                                  }`}>
-                                    {isSelected && <Icon icon="lucide:check" className="w-2.5 h-2.5 text-black" />}
-                                  </div>
-                                )}
-                              </button>
-                            );
-                          })}
+                        <div>
+                          <label className="block text-xs font-medium text-gray-400 mb-1.5">Mission</label>
+                          <textarea
+                            value={mission}
+                            onChange={(e) => setMission(e.target.value)}
+                            placeholder="What is the company's mission?"
+                            rows={2}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-black border border-white/10 text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10 transition-colors resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-400 mb-1.5">Vision</label>
+                          <textarea
+                            value={vision}
+                            onChange={(e) => setVision(e.target.value)}
+                            placeholder="What is the long-term vision?"
+                            rows={2}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-black border border-white/10 text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10 transition-colors resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-400 mb-1.5">Core Values</label>
+                          <input
+                            type="text"
+                            value={values}
+                            onChange={(e) => setValues(e.target.value)}
+                            placeholder="Innovation, Speed, Quality (comma separated)"
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-black border border-white/10 text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10 transition-colors"
+                          />
                         </div>
                       </motion.div>
                     )}

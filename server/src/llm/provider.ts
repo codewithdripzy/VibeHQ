@@ -531,7 +531,210 @@ export class GoogleProvider extends BaseLLMProvider {
   }
 }
 
-export type ProviderType = "ollama" | "huggingface" | "groq" | "openai" | "anthropic" | "google";
+export class NvidiaProvider extends BaseLLMProvider {
+  constructor(config?: Partial<LLMProviderConfig>) {
+    super({
+      baseUrl: config?.baseUrl || "https://integrate.api.nvidia.com/v1",
+      apiKey: config?.apiKey || process.env.NVIDIA_API_KEY,
+      model: config?.model || "deepseek-ai/deepseek-v4-pro",
+      temperature: config?.temperature ?? 1,
+      maxTokens: config?.maxTokens ?? 16384,
+      timeout: config?.timeout ?? 60000,
+    });
+  }
+
+  async chat(messages: LLMMessage[], options?: {
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<LLMResponse> {
+    const startTime = Date.now();
+
+    // Build messages — support multimodal content arrays
+    const chatMessages = messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const response = await this.fetchWithTimeout(
+      `${this.config.baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.config.model,
+          messages: chatMessages,
+          temperature: options?.temperature ?? this.config.temperature,
+          max_tokens: options?.maxTokens ?? this.config.maxTokens,
+          top_p: this.config.topP ?? 0.95,
+          extra_body: {
+            chat_template_kwargs: { thinking: false },
+          },
+          stream: false,
+        }),
+      },
+      this.config.timeout
+    );
+
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => "");
+      throw new Error(`NVIDIA API error: ${response.status} - ${errBody}`);
+    }
+
+    const data = await response.json();
+    const latency = Date.now() - startTime;
+
+    return {
+      content: data.choices?.[0]?.message?.content || "",
+      model: this.config.model,
+      provider: "nvidia",
+      usage: {
+        promptTokens: data.usage?.prompt_tokens || 0,
+        completionTokens: data.usage?.completion_tokens || 0,
+        totalTokens: data.usage?.total_tokens || 0,
+      },
+      latency,
+    };
+  }
+
+  async isAvailable(): Promise<boolean> {
+    return !!this.config.apiKey;
+  }
+
+  async getModels(): Promise<string[]> {
+    return [
+      "deepseek-ai/deepseek-v4-pro",
+      "deepseek-ai/deepseek-v4-flash",
+      "google/gemma-4-31b-it",
+      "meta/llama-3.3-70b-instruct",
+      "meta/llama-3.1-70b-instruct",
+      "meta/llama-4-maverick-17b-128e-instruct",
+      "qwen/qwq-32b",
+      "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+    ];
+  }
+}
+
+export type ProviderType = "ollama" | "huggingface" | "groq" | "openai" | "anthropic" | "google" | "nvidia" | "fallback";
+
+export class FallbackProvider extends BaseLLMProvider {
+  constructor(config?: Partial<LLMProviderConfig>) {
+    super({
+      baseUrl: "",
+      model: "fallback-simulated",
+      temperature: 0.7,
+      maxTokens: 2048,
+    });
+  }
+
+  async chat(messages: LLMMessage[], options?: {
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<LLMResponse> {
+    const systemMsg = messages.find(m => m.role === "system")?.content || "";
+    const lastUserMsg = [...messages].reverse().find(m => m.role === "user")?.content || "";
+
+    const content = this.generateContextualResponse(systemMsg, lastUserMsg);
+
+    return {
+      content,
+      model: "fallback-simulated",
+      provider: "fallback",
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      latency: 0,
+    };
+  }
+
+  async isAvailable(): Promise<boolean> {
+    return true;
+  }
+
+  async getModels(): Promise<string[]> {
+    return ["fallback-simulated"];
+  }
+
+  private generateContextualResponse(system: string, lastMessage: string): string {
+    const isDelegation = lastMessage.includes("DELEGATE") || lastMessage.includes("delegate");
+    const isSearch = lastMessage.includes("search") || lastMessage.includes("SEARCH");
+    const isBrainstormState = lastMessage.includes("Current brainstorm state");
+    const isSynthesis = lastMessage.includes("SYNTHESIS") || lastMessage.includes("FINAL_REPORT");
+
+    if (isBrainstormState) {
+      if (isDelegation) {
+        return JSON.stringify({
+          thought: "I need specialized input on this. Let me delegate to the right team.",
+          actions: [
+            {
+              type: "delegate",
+              to: "Engineering Team",
+              question: "What technical approach should we take and what are the key risks?",
+              context: "Board is exploring initial strategy. Need engineering perspective on feasibility.",
+              deadline: "24h",
+              documentDraft: {
+                title: "Technical Feasibility Assessment",
+                summary: "Board request for engineering input on proposed direction.",
+                generalContext: "Early-stage strategy exploration. Board has identified potential opportunity and needs technical validation.",
+                specificRequest: "Assess technical feasibility, recommended approach, and key risks.",
+                deliverables: ["Feasibility assessment", "Risk list"],
+                evaluationCriteria: "Practical, research-backed recommendations."
+              }
+            }
+          ]
+        });
+      }
+
+      if (isSearch) {
+        return JSON.stringify({
+          thought: "Let me gather some market data first.",
+          actions: [
+            { type: "search", query: "market trends 2025" }
+          ]
+        });
+      }
+
+      if (isSynthesis) {
+        return JSON.stringify({
+          thought: "I have enough information to compile the final report.",
+          actions: [{
+            type: "synthesis",
+            problemStatement: "Market opportunity identified in the target industry.",
+            proposedSolution: "A technology solution addressing key pain points.",
+            targetMarket: "Mid-market companies in the target industry.",
+            businessModel: "SaaS subscription with tiered pricing.",
+            competitiveAdvantage: "First-mover advantage with AI-powered approach.",
+            mvpScope: "Core platform with essential features for initial launch.",
+            resourceRequirements: "Small engineering team, modest infrastructure costs.",
+            riskAssessment: "Moderate risk — market timing and execution are key factors.",
+            recommendation: "proceed",
+            nextSteps: ["Finalize technical architecture", "Build MVP", "Launch beta"]
+          }]
+        });
+      }
+
+      return JSON.stringify({
+        thought: "Let me think through this systematically.",
+        actions: [
+          {
+            type: "answer",
+            answer: "Based on initial analysis, this is a promising direction. The market shows strong demand and the competitive landscape allows for differentiation.",
+            confidence: 70
+          },
+          { type: "advance_phase", phase: 2 }
+        ]
+      });
+    }
+
+    return JSON.stringify({
+      thought: "Processing the current state of the brainstorm.",
+      actions: [
+        { type: "answer", answer: "Acknowledged. Continuing with the next step.", confidence: 60 }
+      ]
+    });
+  }
+}
 
 export function createProvider(type: ProviderType, config?: Partial<LLMProviderConfig>): BaseLLMProvider {
   switch (type) {
@@ -547,6 +750,10 @@ export function createProvider(type: ProviderType, config?: Partial<LLMProviderC
       return new AnthropicProvider(config);
     case "google":
       return new GoogleProvider(config);
+    case "nvidia":
+      return new NvidiaProvider(config);
+    case "fallback":
+      return new FallbackProvider(config);
     default:
       throw new Error(`Unknown provider type: ${type}`);
   }

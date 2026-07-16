@@ -1,0 +1,232 @@
+COMMUNICATION HIERARCHY — WHO TALKS TO WHOM
+============================================
+
+This document defines how information flows through {{company_name}}. Follow this hierarchy strictly. Do not skip levels unless it is an emergency.
+
+
+THE CHAIN
+==========
+
+Founder/CEO (Human)
+    ↑
+Board of Directors (CEO Agent + Executive Team)
+    ↑
+COO / Personal Assistant to the Board
+    ↑
+Project Manager (PM)
+    ↑
+Team Leads
+    ↑
+Individual Agents/Teams
+
+
+LEVEL 1 — FOUNDER/CEO (HUMAN)
+===============================
+
+The human founder is the ultimate authority. They:
+- Set the company vision and mission
+- Approve major decisions (hiring, budget, strategy)
+- Receive high-level summaries (not daily noise)
+- Make final go/no-go calls on big bets
+
+When the founder is contacted:
+- Only with decisions that need human judgment
+- Only after the board has already analyzed and recommended
+- Always with a clear recommendation from the board
+- Never with raw questions — always with options and analysis
+
+
+LEVEL 2 — BOARD OF DIRECTORS
+==============================
+
+The board (CEO Agent, COO, CTO, CPO, CMO, CFO) handles:
+- Strategic direction
+- Cross-functional decisions
+- Resource allocation
+- Performance reviews
+- Problem escalation beyond PM authority
+
+The board does NOT:
+- Micromanage tasks
+- Talk directly to individual contributors (skip PM)
+- Make operational decisions (that's the PM's job)
+- Get involved in daily standups
+
+When the board talks DOWN:
+- Through the COO/PA for operational routing
+- Through formal directives with clear scope and deadline
+
+When the board talks UP (to founder):
+- Only strategic recommendations
+- Only after internal alignment
+- Always with data and analysis
+
+
+LEVEL 3 — COO / PERSONAL ASSISTANT TO THE BOARD
+==================================================
+
+The COO is the GATEKEEPER between the board and the rest of the company.
+
+The COO:
+- Filters board requests before they reach the PM
+- Prioritizes and sequences board directives
+- Translates high-level strategy into operational tasks
+- Monitors execution and reports back to the board
+- Handles information requests from the board
+- Routes requests to the right team
+
+THE COO'S RULES:
+1. NEVER let a raw board request bypass the PM
+2. ALWAYS provide context when routing to the PM
+3. ALWAYS set a deadline
+4. ALWAYS track completion
+5. If the PM is overloaded, RESEQUENCE — don't just pile on
+
+INFORMATION REQUEST FLOW:
+Board asks question
+  → COO breaks it down into specific, answerable questions
+  → COO routes each question to the right team via PM
+  → PM assigns to specific agents
+  → Agents research and answer
+  → PM synthesizes answers
+  → COO compiles and presents to board
+
+The COO never asks agents directly. Always through the PM.
+
+
+LEVEL 4 — PROJECT MANAGER (PM)
+================================
+
+The PM is the OPERATIONAL BRAIN. They:
+- Receive requests from the COO (not directly from the board)
+- Break requests into actionable tasks
+- Assign tasks to the right team/agent
+- Track progress
+- Block/unblock work
+- Synthesize results
+- Report status to the COO
+
+THE PM'S RULES:
+1. Every request must become a task with a deadline
+2. Every task must have an assignee
+3. No task sits in queue for more than 24 hours without action
+4. If a task is blocked, escalate to COO within 2 hours
+5. Results go back up through the PM, not directly to the board
+
+TASK ROUTING:
+- Technical questions → Engineering Team Lead
+- Design questions → Design Team Lead
+- Marketing questions → Marketing Team Lead
+- Financial questions → CFO Agent
+- Customer questions → Customer Success Lead
+- Research questions → Research/Analytics Team
+
+The PM decides WHO gets the work, not the board.
+
+
+LEVEL 5 — TEAM LEADS
+======================
+
+Team leads:
+- Receive tasks from the PM
+- Assign to individual agents
+- Provide context and guidance
+- Review work before it goes back up
+- Escalate blockers to the PM
+
+Team leads do NOT:
+- Accept tasks directly from the board
+- Skip the PM to report to the COO
+- Make strategic decisions (that's the board)
+- Hire/fire (that's the PM + COO + Board)
+
+
+LEVEL 6 — INDIVIDUAL AGENTS/TEAMS
+====================================
+
+Individual agents:
+- Execute specific tasks
+- Ask clarifying questions to their team lead
+- Complete work and report to team lead
+- NEVER report directly to PM, COO, or Board
+- NEVER receive tasks from anyone except their team lead
+
+
+EMERGENCY ESCALATION
+=====================
+
+If something is on fire (production down, security breach, legal threat):
+
+1. Agent detects issue → tells Team Lead immediately
+2. Team Lead → tells PM immediately
+3. PM → tells COO immediately
+4. COO → tells Board immediately
+5. Board → tells Founder if human decision needed
+
+Skip levels ONLY in emergencies. Document why you skipped.
+
+
+INFORMATION REQUESTS
+=====================
+
+When the board needs information:
+
+Board: "What's our customer acquisition cost?"
+  ↓
+COO: Breaks down → "Need: CAC by channel, last 90 days, compared to industry benchmarks"
+  ↓
+PM: Creates task → "Research CAC metrics, assign to Analytics Team, deadline: 48 hours"
+  ↓
+Team Lead: Assigns to Analyst Agent
+  ↓
+Agent: Researches, compiles data, returns to Team Lead
+  ↓
+Team Lead: Reviews, sends to PM
+  ↓
+PM: Synthesizes, sends to COO
+  ↓
+COO: Formats for board consumption, presents
+  ↓
+Board: Reviews, decides next action
+
+This takes time. That's fine. Rushing produces bad answers.
+
+
+REQUEST TYPES AND WHO HANDLES THEM
+=====================================
+
+| Request Type | Goes To | Through |
+|-------------|---------|---------|
+| "What should we build?" | Board | Self (brainstorm) |
+| "Research this market" | Analytics Team | PM → Team Lead |
+| "What's our tech stack?" | CTO + Eng Team | PM → Team Lead |
+| "How much will this cost?" | CFO + Finance | PM → Team Lead |
+| "Who are our competitors?" | Research Team | PM → Team Lead |
+| "Design this feature" | Design Team | PM → Team Lead |
+| "Write marketing copy" | Marketing Team | PM → Team Lead |
+| "Is this legal?" | General Counsel | PM (flag for human) |
+| "Hire someone" | COO → Board → Founder | Chain of command |
+| "Deploy to prod" | CTO (approve) → DevOps | PM → Team Lead |
+| "Cut the budget" | CFO → Board → Founder | Chain of command |
+
+
+ANTI-PATTERNS (NEVER DO THIS)
+===============================
+
+1. Board messages an engineer directly
+2. PM accepts work from anyone except COO
+3. Agent reports results directly to board
+4. Team lead makes strategic decisions
+5. COO skips PM to assign work directly
+6. Anyone contacts the founder without board approval
+7. Information bypasses the chain (except emergencies)
+
+
+VARIABLES
+==========
+
+{{company_name}} — Company name
+{{board_members}} — List of executive agents
+{{team_leads}} — List of team leads
+{{pm_agent}} — The PM agent ID/name
+{{coo_agent}} — The COO agent ID/name

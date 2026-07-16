@@ -1255,6 +1255,74 @@ Real-time notification system for agents and users.
 | Mention | Agent mentioned in channel |
 | Announcement | Company-wide message |
 | System | System-level events |
+| Request | Board/agent request for owner approval |
+
+---
+
+# Requests
+
+The request system allows boards, teams, and agents to formally request things from the owner. When an agent or team needs a resource, integration, feature, budget, or any other support to perform their tasks, they submit a request through this channel.
+
+## Request Types
+
+| Type | Description |
+|------|-------------|
+| Integration | Request to connect a new tool or service |
+| Resource | Request for hardware, software, or cloud credits |
+| Feature | Request a new product feature |
+| Access | Request access to a system, API, or credential |
+| Budget | Request additional budget allocation |
+| Personnel | Request to hire a new agent |
+| Other | Any other request not covered above |
+
+## Request Lifecycle
+
+```
+Pending → Approved → Fulfilled
+         ↓
+       Denied
+         ↓
+       Cancelled
+```
+
+## Request Fields
+
+- **Title** — What is being requested
+- **Description** — Detailed explanation of the need
+- **Type** — Category of request
+- **Priority** — Low, medium, high, urgent
+- **Reason** — Why this is needed to perform tasks
+- **Requested By** — Who is making the request (agent or team)
+- **Requested For** — What project or task needs this
+
+## How It Works
+
+1. An agent or team identifies a need (missing tool, blocked task, resource gap)
+2. They submit a request with a clear title, description, and reason
+3. The request appears in the Requests dashboard for the owner
+4. The owner reviews and approves or denies the request
+5. Once approved, the resource is provisioned or the request is fulfilled
+6. The requesting agent is notified and can resume work
+
+## Use Cases
+
+- Engineering team needs a new API integration (e.g., payment processor)
+- Marketing needs budget for a paid campaign
+- DevOps needs cloud credits for infrastructure
+- Agent needs elevated access to a deployment pipeline
+- Team needs a new tool license to complete a sprint
+- CTO requests hiring a security engineer
+
+## Dashboard
+
+The Requests page provides:
+
+- **Filter by status** — View all, pending, approved, fulfilled, or denied requests
+- **Stats cards** — At-a-glance counts of pending, approved, and fulfilled requests
+- **Request cards** — Each request shows type icon, title, status badge, priority, description, reason, and who requested it
+- **Type indicators** — Visual icons for each request type (plug for integrations, box for resources, sparkles for features, etc.)
+
+This ensures no request falls through the cracks and the owner has full visibility into what the company needs to operate effectively.
 
 ---
 
@@ -2168,6 +2236,7 @@ Every entity has full CRUD with pagination, search, filtering:
 | `GET/POST /api/calendar-events` | Calendar events |
 | `GET/POST /api/knowledge-entries` | Knowledge base |
 | `GET/POST /api/decision-logs` | Decision logs |
+| `GET/POST /api/requests` | Requests |
 | `GET/POST /api/anomaly-alerts` | Anomaly alerts |
 | `GET/POST /api/sla-tracking` | SLA tracking |
 | `GET/POST /api/rbac-roles` | RBAC roles |
@@ -2348,6 +2417,7 @@ Company
   ├── workflows[] → Workflow
   ├── escalationChains[] → EscalationChain
   ├── approvalWorkflows[] → ApprovalWorkflow
+  ├── requests[] → Request
   ├── meetingBookings[] → MeetingBooking
   ├── externalCalendars[] → ExternalCalendar
   ├── calendarEvents[] → CompanyCalendarEvent
@@ -2944,4 +3014,16 @@ Notification
   ├── isRead, readAt
   ├── actionUrl, actionLabel
   └── sender, senderType
+
+Request
+  ├── uid, company → Company
+  ├── title, description
+  ├── type (integration | resource | feature | access | budget | personnel | other)
+  ├── status (pending | approved | denied | fulfilled | cancelled)
+  ├── priority (low | medium | high | urgent)
+  ├── requestedBy (agent or team name)
+  ├── requestedFor (project or task context)
+  ├── reason (why this is needed)
+  ├── createdAt, updatedAt, fulfilledAt
+  └── tags[]
 ```

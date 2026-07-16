@@ -50,6 +50,7 @@ import EventLog from "../models/eventLog.model";
 import DirectMessage from "../models/directMessage.model";
 import MCPServer from "../models/mcpServer.model";
 import LLMConfig from "../models/llmConfig.model";
+import BrainstormSession from "../models/brainstormSession.model";
 
 export const services = {
     user: createCrudService(User),
@@ -102,6 +103,7 @@ export const services = {
     directMessage: createCrudService(DirectMessage),
     mcpServer: createCrudService(MCPServer),
     llmConfig: createCrudService(LLMConfig),
+    brainstormSession: createCrudService(BrainstormSession),
     resource: createCrudService(CompanyResource),
     forecast: createCrudService(FinancialForecast),
 };

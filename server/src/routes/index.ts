@@ -2,21 +2,48 @@ import { Router } from "express";
 import { createCrudRoutes } from "./crudRoutes";
 import { services } from "../services";
 import authRouter from "./auth.routes";
+import brainstormRouter from "./brainstorm.routes";
 import { authenticate, AuthRequest } from "../core/middleware/auth.middleware";
 import { rateLimit } from "../core/middleware/rateLimit.middleware";
 import { Response, NextFunction } from "express";
 import { v4 as uuidv4 } from "uuid";
+import brainstormService from "../services/brainstorm.service";
 
 const router = Router();
 
 // Auth
 router.use("/auth", authRouter);
 
+// Brainstorm
+router.use("/brainstorm", brainstormRouter);
+
 // Core entities
 router.use("/users", createCrudRoutes({ service: services.user }));
 
 // Company with auto-set owner/slug and starting team creation
-const companyRouter = createCrudRoutes({ service: services.company });
+const companyRouter = Router();
+companyRouter.get("/", authenticate, rateLimit(), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+        const result = await services.company.findAll(
+            {},
+            {
+                page: parseInt(req.query.page as string) || 1,
+                limit: parseInt(req.query.limit as string) || 20,
+                sort: (req.query.sort as string) || "createdAt",
+                order: (req.query.order as "asc" | "desc") || "desc",
+                search: req.query.search as string,
+                searchFields: (req.query.searchFields as string)?.split(",") || [],
+            }
+        );
+        res.json(result);
+    } catch (error) { next(error); }
+});
+companyRouter.get("/:id", authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+        const doc = await services.company.findById(req.params.id);
+        res.json({ data: doc });
+    } catch (error) { next(error); }
+});
 companyRouter.post("/", authenticate, rateLimit(), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
         const { name, slug, startingTeams, ...rest } = req.body;
@@ -26,6 +53,7 @@ companyRouter.post("/", authenticate, rateLimit(), async (req: AuthRequest, res:
         }
         const companyData = {
             ...rest,
+            uid: uuidv4(),
             name,
             slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
             owner: req.user._id,
@@ -52,10 +80,61 @@ companyRouter.post("/", authenticate, rateLimit(), async (req: AuthRequest, res:
 
         await services.company.update((company as any)._id, { teams: teams.map((t: any) => t._id) });
 
-        res.status(201).json({ company, teams });
+        // Auto-create a board meeting + brainstorm session
+        try {
+            const meetingUid = uuidv4();
+            const meeting = await services.meeting.create({
+                uid: meetingUid,
+                title: `Board Meeting — ${name} Launch`,
+                description: `Initial board meeting to brainstorm strategy for ${name}.`,
+                company: (company as any)._id,
+                type: "executive_board",
+                status: "in_progress",
+                scheduledAt: new Date(),
+                durationMinutes: 10,
+                organizer: teams[0]?._id,
+                attendees: teams.map((t: any) => t._id),
+            } as any);
+
+            // Start brainstorm session linked to the meeting
+            const session = await brainstormService.startSession({
+                companyId: (company as any)._id.toString(),
+                userId: req.user._id.toString(),
+                trigger: "manual",
+                maxDepth: 5,
+                maxTurns: 30,
+                timeLimitMinutes: 10,
+            });
+
+            // Link meeting to brainstorm session
+            await services.meeting.update((meeting as any)._id, { notes: `Brainstorm Session: ${session.uid}` } as any);
+        } catch (err) {
+            console.error("Failed to auto-create board meeting:", err);
+            // Non-fatal — company was created successfully
+        }
+
+        res.status(201).json({ message: "Company created", data: company });
     } catch (error) {
         next(error);
     }
+});
+companyRouter.put("/:id", authenticate, rateLimit(), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+        const doc = await services.company.update(req.params.id, req.body);
+        res.json(doc);
+    } catch (error) { next(error); }
+});
+companyRouter.patch("/:id", authenticate, rateLimit(), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+        const doc = await services.company.update(req.params.id, req.body);
+        res.json(doc);
+    } catch (error) { next(error); }
+});
+companyRouter.delete("/:id", authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+        await services.company.softDelete(req.params.id);
+        res.json({ message: "Deleted" });
+    } catch (error) { next(error); }
 });
 router.use("/companies", companyRouter);
 router.use("/teams", createCrudRoutes({ service: services.team }));
@@ -135,5 +214,11 @@ router.use("/llm-configs", createCrudRoutes({ service: services.llmConfig }));
 
 // Audit
 router.use("/audit-logs", createCrudRoutes({ service: services.auditLog }));
+
+// Brainstorm sessions (CRUD)
+router.use("/brainstorm-sessions", createCrudRoutes({
+    service: services.brainstormSession,
+    companyIdExtractor: (req) => (req.query.companyId as string) || req.user?.companyId || "",
+}));
 
 export default router;

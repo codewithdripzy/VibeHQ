@@ -7,14 +7,38 @@ export interface Company {
     description?: string;
     logo?: string;
     industry?: string;
+    mission?: string;
+    vision?: string;
+    values?: string[];
     status: "draft" | "active" | "paused" | "archived";
     owner: string;
     createdAt: string;
+    website?: string;
+    billing?: {
+        plan?: "free" | "starter" | "professional" | "enterprise";
+        monthlyBudget?: number;
+        spentThisMonth?: number;
+    };
+    settings?: {
+        maxAgents?: number;
+        maxTeams?: number;
+        autoHire?: boolean;
+        approvalRequired?: boolean;
+        timezone?: string;
+        defaultCurrency?: string;
+    };
     metadata?: {
         employeeCount?: number;
         activeProjectCount?: number;
         totalRevenue?: number;
+        totalExpenses?: number;
+        totalCustomers?: number;
     };
+    teams?: string[];
+    projects?: string[];
+    customers?: string[];
+    channels?: string[];
+    ideas?: string[];
 }
 
 interface CompaniesResponse {
@@ -51,7 +75,7 @@ class CompanyService extends ApiService {
         return data;
     }
 
-    async createCompany(payload: { name: string; description?: string; industry?: string }) {
+    async createCompany(payload: { name: string; description?: string; industry?: string; mission?: string; vision?: string; values?: string[] }) {
         const { data } = await this.post<CompanyResponse>("/api/companies", payload);
         return data;
     }
