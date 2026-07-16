@@ -536,7 +536,7 @@ export class NvidiaProvider extends BaseLLMProvider {
     super({
       baseUrl: config?.baseUrl || "https://integrate.api.nvidia.com/v1",
       apiKey: config?.apiKey || process.env.NVIDIA_API_KEY,
-      model: config?.model || "deepseek-ai/deepseek-v4-pro",
+      model: config?.model || "deepseek-ai/deepseek-v4-flash",
       temperature: config?.temperature ?? 1,
       maxTokens: config?.maxTokens ?? 16384,
       timeout: config?.timeout ?? 60000,
@@ -569,9 +569,6 @@ export class NvidiaProvider extends BaseLLMProvider {
           temperature: options?.temperature ?? this.config.temperature,
           max_tokens: options?.maxTokens ?? this.config.maxTokens,
           top_p: this.config.topP ?? 0.95,
-          extra_body: {
-            chat_template_kwargs: { thinking: false },
-          },
           stream: false,
         }),
       },

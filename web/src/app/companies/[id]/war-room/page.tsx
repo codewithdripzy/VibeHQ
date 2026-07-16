@@ -21,8 +21,9 @@ interface ChatMessage {
   team: string;
   sender: string;
   content: string;
-  type: "message" | "delegation" | "response" | "system";
+  type: "message" | "delegation" | "response" | "system" | "typing";
   linkedDelegationTo?: string;
+  typing?: boolean;
   resources?: Resource[];
   timestamp: string;
 }
@@ -140,7 +141,28 @@ function ChatBubble({
   const isDelegation = msg.type === "delegation";
   const isSystem = msg.type === "system";
   const isResponse = msg.type === "response";
+  const isTyping = msg.type === "typing" && msg.typing;
   const teamStyle = teamColors[msg.team] || teamColors.board;
+
+  if (isTyping) {
+    return (
+      <div className="flex flex-col gap-1 opacity-60">
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${teamStyle}`}>
+            {msg.sender}
+          </span>
+        </div>
+        <div className="ml-1 text-[11px] text-gray-400 italic flex items-center gap-1">
+          <span>{msg.sender} is thinking</span>
+          <span className="flex gap-0.5">
+            <span className="w-1 h-1 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+            <span className="w-1 h-1 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+            <span className="w-1 h-1 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`flex flex-col gap-1 ${isSystem ? "opacity-70" : ""}`}>
@@ -196,6 +218,7 @@ function ChatBubble({
 
 function WarRoomDetail({ session }: { session: Session }) {
   const [activeTab, setActiveTab] = useState("board");
+  const [showThinkingLogs, setShowThinkingLogs] = useState(false);
 
   // Extract unique teams from chatLog, preserving order, board first
   const teams = Array.from(new Set(session.chatLog.map((m) => m.team)));
@@ -274,9 +297,43 @@ function WarRoomDetail({ session }: { session: Session }) {
 
       {/* Footer info */}
       <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between text-[9px] text-gray-600">
-        <span>{activeMessages.length} messages in {activeTab}</span>
-        <span>{session.chatLog.length} total across all teams</span>
+        <div className="flex items-center gap-3">
+          <span>{activeMessages.length} messages in {activeTab}</span>
+          <span>{session.chatLog.length} total across all teams</span>
+        </div>
+        <button
+          onClick={() => setShowThinkingLogs(!showThinkingLogs)}
+          className="flex items-center gap-1 text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          <Icon icon={showThinkingLogs ? "lucide:chevron-down" : "lucide:chevron-up"} className="w-3 h-3" />
+          <span>Thinking Logs</span>
+        </button>
       </div>
+
+      {/* Thinking Logs Panel */}
+      {showThinkingLogs && (
+        <div className="border-t border-white/5 bg-black/50 max-h-48 overflow-y-auto">
+          <div className="p-3 space-y-2">
+            <div className="text-[9px] font-medium text-gray-500 uppercase tracking-wider mb-2">Activity Log</div>
+            {session.chatLog
+              .filter((m) => m.type === "typing" || m.type === "system")
+              .slice(-10)
+              .reverse()
+              .map((msg, i) => (
+                <div key={i} className="flex items-start gap-2 text-[10px]">
+                  <span className="text-gray-600 shrink-0">{timeAgo(msg.timestamp)}</span>
+                  <span className={`font-medium ${msg.type === "typing" ? "text-amber-400" : "text-gray-400"}`}>
+                    {msg.sender}:
+                  </span>
+                  <span className="text-gray-500 truncate">{msg.content}</span>
+                </div>
+              ))}
+            {session.chatLog.filter((m) => m.type === "typing" || m.type === "system").length === 0 && (
+              <div className="text-[10px] text-gray-600 italic">No activity yet</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

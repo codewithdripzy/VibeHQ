@@ -4,6 +4,7 @@ import { chat } from "../llm/router";
 import type { LLMMessage } from "../llm/provider";
 import { toolRegistry, ToolResult } from "../tools/registry";
 import { Company } from "../models/company.model";
+import { cache } from "./cache.service";
 import fs from "fs";
 import path from "path";
 
@@ -192,6 +193,7 @@ class BrainstormService {
         let turns = session.turnsUsed || 0;
         const maxTurns = session.maxTurns || 30;
         const agents = ["CEO", "CTO", "CMO", "CFO", "COO"];
+        const searchedQueries = new Set<string>(); // Track search queries to prevent loops
 
         while (turns < maxTurns) {
             const currentSession = await BrainstormSession.findById(sessionId);
@@ -206,67 +208,124 @@ class BrainstormService {
             turns++;
             currentSession.turnsUsed = turns;
 
-            // Rotate agent for each turn to simulate different team members
-            const currentAgent = agents[turns % agents.length];
+            // Pick 2-3 agents to respond in parallel for natural conversation
+            const numAgents = 2 + Math.floor(Math.random() * 2); // 2 or 3
+            const shuffled = [...agents].sort(() => Math.random() - 0.5);
+            const activeAgents = shuffled.slice(0, numAgents);
 
-            // Push typing indicator before the delay
-            (currentSession as any).chatLog.push({
-                team: "board",
-                sender: currentAgent,
-                content: `${currentAgent} is thinking...`,
-                type: "typing",
-                typing: true,
-                timestamp: new Date(),
-            });
-            await currentSession.save();
-
-            // Dynamic delay: 500ms to 3s to simulate agent thinking
-            const delay = 500 + Math.random() * 2500;
-            await new Promise(resolve => setTimeout(resolve, delay));
-
-            // Inject full conversation context so all agents can see everything
-            const conversationSummary = this.buildConversationSummary(currentSession);
-            const agentContext = `\n\n--- AGENT CONTEXT ---\nYou are acting as: ${currentAgent}\nFull conversation across all teams:\n${conversationSummary}\n--- END CONTEXT ---`;
-
-            // Add agent context to the last user message for visibility
-            if (messages.length > 0) {
-                const lastMsg = messages[messages.length - 1];
-                if (lastMsg.role === "user") {
-                    lastMsg.content += agentContext;
-                } else {
-                    messages.push({ role: "user", content: `Current state:${agentContext}` });
+            // Clean up any orphaned typing indicators from previous failed turns
+            const logForCleanup = (currentSession as any).chatLog;
+            for (let i = logForCleanup.length - 1; i >= 0; i--) {
+                if (logForCleanup[i].type === "typing" && logForCleanup[i].typing === true) {
+                    logForCleanup.splice(i, 1);
                 }
             }
 
+            // Push typing indicators for all active agents
+            for (const agent of activeAgents) {
+                (currentSession as any).chatLog.push({
+                    team: "board",
+                    sender: agent,
+                    content: `${agent} is thinking...`,
+                    type: "typing",
+                    typing: true,
+                    timestamp: new Date(),
+                });
+            }
             await currentSession.save();
 
+            // Helper to remove typing indicator
+            const removeTyping = async (session: any, agent: string) => {
+                const log = (session as any).chatLog;
+                const idx = log.findIndex((m: any) => m.type === "typing" && m.sender === agent && m.typing === true);
+                if (idx !== -1) log.splice(idx, 1);
+                await session.save().catch(() => {});
+            };
+
+            // Inject full conversation context
+            const conversationSummary = this.buildConversationSummary(currentSession);
+
+            // Run all agents in parallel
+            const LLM_TIMEOUT = 60000;
             try {
-                const response = await chat(messages, session.company.toString());
-                messages.push({ role: "assistant", content: response.content });
+                const agentPromises = activeAgents.map(async (agent) => {
+                const agentContext = `\n\n--- AGENT CONTEXT ---\nYou are acting as: ${agent}\nFull conversation across all teams:\n${conversationSummary}\n--- END CONTEXT ---`;
+
+                const agentMessages = [...messages];
+                // Limit context window — keep system prompt + last 10 messages to avoid overwhelming small models
+                if (agentMessages.length > 12) {
+                    const systemMsg = agentMessages[0]; // Keep system prompt
+                    const recentMsgs = agentMessages.slice(-10);
+                    agentMessages.length = 0;
+                    agentMessages.push(systemMsg, ...recentMsgs);
+                }
+                if (agentMessages.length > 0) {
+                    const lastMsg = agentMessages[agentMessages.length - 1];
+                    if (lastMsg.role === "user") {
+                        agentMessages[agentMessages.length - 1] = {
+                            ...lastMsg,
+                            content: lastMsg.content + agentContext,
+                        };
+                    } else {
+                        agentMessages.push({ role: "user", content: `Current state:${agentContext}` });
+                    }
+                }
+
+                try {
+                    console.log(`[Brainstorm] Turn ${turns}: ${agent} calling LLM...`);
+                    const response = await Promise.race([
+                        chat(agentMessages, session.company.toString()),
+                        new Promise<never>((_, reject) =>
+                            setTimeout(() => reject(new Error("LLM call timed out")), LLM_TIMEOUT)
+                        ),
+                    ]);
+                    console.log(`[Brainstorm] Turn ${turns}: ${agent} responded (${response.content.length} chars)`);
+                    return { agent, response: response.content, error: null };
+                } catch (error: any) {
+                    console.error(`[Brainstorm] Turn ${turns}: ${agent} failed:`, error.message);
+                    return { agent, response: null, error: error.message };
+                }
+            });
+
+            const results = await Promise.allSettled(agentPromises);
+
+            // Process all responses
+            for (const result of results) {
+                const data = result.status === "fulfilled" ? result.value : null;
+                if (!data) continue;
 
                 // Remove typing indicator
-                const chatLog = (currentSession as any).chatLog;
-                const typingIdx = chatLog.findIndex(
-                    (m: any) => m.type === "typing" && m.sender === currentAgent && m.typing === true
-                );
-                if (typingIdx !== -1) chatLog.splice(typingIdx, 1);
+                await removeTyping(currentSession, data.agent);
 
-                const actions = this.parseBrainstormResponse(response.content);
+                if (data.error || !data.response) continue;
 
-                // Add agent's main message to chat log
-                const cleanResponse = response.content.replace(/```json\s*[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
-                if (cleanResponse) {
+                messages.push({ role: "assistant", content: data.response });
+
+                // Parse response
+                const parsed = this.parseResponse(data.response);
+
+                // Add conversation messages to chat log
+                for (const msg of parsed.conversation) {
                     (currentSession as any).chatLog.push({
                         team: "board",
-                        sender: currentAgent,
-                        content: cleanResponse,
+                        sender: msg.agent,
+                        content: msg.message,
                         type: "message",
                         timestamp: new Date(),
                     });
                 }
 
-                for (const action of actions) {
+                // Process actions
+                for (const action of parsed.actions) {
                     if (action.type === "search") {
+                        // Skip duplicate searches
+                        const queryKey = action.query.toLowerCase().trim();
+                        if (searchedQueries.has(queryKey)) {
+                            console.log(`[Brainstorm] Skipping duplicate search: "${action.query}"`);
+                            continue;
+                        }
+                        searchedQueries.add(queryKey);
+
                         const searchResult = await this.executeSearch(
                             action.query,
                             session.company.toString()
@@ -276,16 +335,14 @@ class BrainstormService {
                             content: `Search results for "${action.query}":\n${JSON.stringify(searchResult, null, 2)}`,
                         });
 
-                        // Add chat message for search
                         (currentSession as any).chatLog.push({
                             team: "board",
-                            sender: currentAgent,
+                            sender: data.agent,
                             content: `🔍 Researching: "${action.query}"`,
                             type: "message",
                             timestamp: new Date(),
                         });
 
-                        // Update question with search data
                         if (currentSession.currentQuestionId) {
                             const q = currentSession.questions.find(
                                 (q: any) => q.id === currentSession.currentQuestionId
@@ -314,7 +371,6 @@ class BrainstormService {
                             createdAt: new Date(),
                         } as any);
 
-                        // Build detailed delegation message
                         const docDraft = action.documentDraft;
                         let delegationContent = `**Requesting information from ${action.to}**\n\n`;
                         delegationContent += `**Question:** ${action.question}\n`;
@@ -338,10 +394,9 @@ class BrainstormService {
                             delegationContent += `\n**Deadline:** ${action.deadline}`;
                         }
 
-                        // Add delegation chat messages
                         (currentSession as any).chatLog.push({
                             team: "board",
-                            sender: currentAgent,
+                            sender: data.agent,
                             content: delegationContent,
                             type: "delegation",
                             linkedDelegationTo: action.to,
@@ -355,7 +410,6 @@ class BrainstormService {
                             timestamp: new Date(),
                         });
 
-                        // Update the question status
                         if (currentSession.currentQuestionId) {
                             const q = currentSession.questions.find(
                                 (q: any) => q.id === currentSession.currentQuestionId
@@ -376,7 +430,6 @@ class BrainstormService {
                     }
 
                     if (action.type === "delegate_response") {
-                        // Find the matching delegation and update it
                         const delegation = currentSession.delegations.find(
                             (d: any) => d.to === action.to && d.status !== "completed"
                         );
@@ -387,7 +440,6 @@ class BrainstormService {
                             delegation.resources = action.resources || [];
                         }
 
-                        // Build response content with resources
                         let responseContent = action.answer || "";
                         if (action.resources?.length) {
                             responseContent += "\n\n---\n**Attached Resources:**\n";
@@ -403,7 +455,6 @@ class BrainstormService {
                             }
                         }
 
-                        // Add response chat message to the team's tab
                         (currentSession as any).chatLog.push({
                             team: action.to,
                             sender: action.to.charAt(0).toUpperCase() + action.to.slice(1),
@@ -413,7 +464,6 @@ class BrainstormService {
                             timestamp: new Date(),
                         });
 
-                        // Also add a system notification to board tab
                         (currentSession as any).chatLog.push({
                             team: "board",
                             sender: "System",
@@ -434,10 +484,9 @@ class BrainstormService {
                                 q.status = q.confidence >= 70 ? "resolved" : "pending";
                                 q.resolvedAt = q.confidence >= 70 ? new Date() : undefined;
 
-                                // Add answer chat message
                                 (currentSession as any).chatLog.push({
                                     team: "board",
-                                    sender: currentAgent,
+                                    sender: data.agent,
                                     content: action.answer,
                                     type: "message",
                                     timestamp: new Date(),
@@ -461,10 +510,9 @@ class BrainstormService {
                         };
                         currentSession.questions.push(newQ as any);
 
-                        // Add new question chat message
                         (currentSession as any).chatLog.push({
                             team: "board",
-                            sender: currentAgent,
+                            sender: data.agent,
                             content: `💭 New question: "${action.question}"`,
                             type: "message",
                             timestamp: new Date(),
@@ -472,7 +520,6 @@ class BrainstormService {
                     }
 
                     if (action.type === "next_question") {
-                        // Find next pending question
                         const nextQ = currentSession.questions.find(
                             (q: any) => q.status === "pending"
                         );
@@ -508,7 +555,7 @@ class BrainstormService {
 
                         (currentSession as any).chatLog.push({
                             team: "board",
-                            sender: currentAgent,
+                            sender: data.agent,
                             content: `📊 Synthesis complete. Recommendation: ${action.recommendation || "iterate"}. ${action.problemStatement || ""}`,
                             type: "message",
                             timestamp: new Date(),
@@ -520,26 +567,52 @@ class BrainstormService {
                         return;
                     }
                 }
-
-                await currentSession.save();
-
-                // Build next prompt with current state
-                const stateSummary = this.buildStateSummary(currentSession);
-                messages.push({
-                    role: "user",
-                    content: `Current brainstorm state:\n${stateSummary}\n\nContinue the brainstorm. What should we explore next? Use search when you need data. Delegate when you need specialized knowledge. Synthesize when you have enough.`,
-                });
-            } catch (error: any) {
-                console.error(`Brainstorm turn ${turns} failed:`, error.message);
-                // Remove typing indicator on error too
-                const chatLogErr = (currentSession as any).chatLog;
-                const typingErr = chatLogErr.findIndex(
-                    (m: any) => m.type === "typing" && m.sender === currentAgent && m.typing === true
-                );
-                if (typingErr !== -1) chatLogErr.splice(typingErr, 1);
-                await currentSession.save().catch(() => {});
-                // Don't break — try next turn
             }
+
+            await currentSession.save();
+
+            // Cache conversation state in Redis (survives server restarts)
+            const cacheKey = `brainstorm:${session.company}:${session.uid}`;
+            await cache.set(cacheKey, {
+                sessionId: session.uid,
+                companyId: session.company.toString(),
+                messages: messages.slice(-20),
+                chatLog: (currentSession as any).chatLog,
+                phase: currentSession.phase,
+                turnsUsed: currentSession.turnsUsed,
+                questions: currentSession.questions,
+                delegations: currentSession.delegations,
+                summary: currentSession.summary,
+                lastUpdated: new Date().toISOString(),
+            }, 86400);
+
+            // Save to company context history
+            const historyKey = `company:${session.company}:context_history`;
+            const existingHistory = await cache.get<any[]>(historyKey) || [];
+            existingHistory.push({
+                sessionId: session.uid,
+                timestamp: new Date().toISOString(),
+                phase: currentSession.phase,
+                agent: activeAgents.join(", "),
+                summary: this.buildStateSummary(currentSession),
+            });
+            if (existingHistory.length > 50) existingHistory.splice(0, existingHistory.length - 50);
+            await cache.set(historyKey, existingHistory, 604800);
+
+            // Build next prompt with current state
+            const stateSummary = this.buildStateSummary(currentSession);
+            messages.push({
+                role: "user",
+                content: `Current brainstorm state:\n${stateSummary}\n\nContinue the brainstorm. What should we explore next? Use search when you need data. Delegate when you need specialized knowledge. Synthesize when you have enough.`,
+            });
+        } catch (error: any) {
+            console.error(`Brainstorm turn ${turns} failed:`, error.message);
+            // Remove all typing indicators on error
+            for (const agent of activeAgents) {
+                await removeTyping(currentSession, agent);
+            }
+            // Don't break — try next turn
+        }
         }
 
         // If we exhausted turns, complete with what we have
@@ -664,6 +737,71 @@ class BrainstormService {
         } catch {
             // If JSON parsing fails, treat entire response as answer
             return [{ type: "answer", answer: response.trim(), confidence: 50 }];
+        }
+    }
+
+    private parseResponse(response: string): { conversation: { agent: string; message: string }[]; actions: any[] } {
+        try {
+            // Try to find the JSON object by matching braces properly
+            let jsonStr = "";
+
+            // First try markdown code block
+            const codeBlockMatch = response.match(/```json\s*([\s\S]+?)\s*```/);
+            if (codeBlockMatch) {
+                jsonStr = codeBlockMatch[1];
+            } else {
+                // Find the first { and match to its closing }
+                const firstBrace = response.indexOf("{");
+                if (firstBrace !== -1) {
+                    let depth = 0;
+                    let end = firstBrace;
+                    for (let i = firstBrace; i < response.length; i++) {
+                        if (response[i] === "{") depth++;
+                        if (response[i] === "}") depth--;
+                        if (depth === 0) { end = i + 1; break; }
+                    }
+                    jsonStr = response.substring(firstBrace, end);
+                }
+            }
+
+            if (!jsonStr) {
+                // No JSON found — treat as plain text from the responding agent
+                return {
+                    conversation: [{ agent: "Board", message: response.trim() }],
+                    actions: [],
+                };
+            }
+
+            const parsed = JSON.parse(jsonStr);
+
+            // Handle conversation format
+            if (parsed.conversation && Array.isArray(parsed.conversation)) {
+                return {
+                    conversation: parsed.conversation.map((c: any) => ({
+                        agent: c.agent || c.sender || "Board",
+                        message: c.message || c.content || "",
+                    })).filter((c: any) => c.message),
+                    actions: parsed.actions || [],
+                };
+            }
+
+            // Handle legacy thought format
+            if (parsed.thought) {
+                return {
+                    conversation: [{ agent: parsed.agent || "Board", message: parsed.thought }],
+                    actions: parsed.actions || [],
+                };
+            }
+
+            // Fallback
+            const message = parsed.message || parsed.content || parsed.answer || "";
+            return {
+                conversation: message ? [{ agent: parsed.agent || "Board", message }] : [],
+                actions: parsed.actions || (parsed.type ? [parsed] : []),
+            };
+        } catch {
+            // JSON parse failed — don't show raw JSON, just skip
+            return { conversation: [], actions: [] };
         }
     }
 
