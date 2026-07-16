@@ -6,6 +6,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "vibehq-secret-key";
 
 export interface AuthRequest extends Request {
     user?: {
+        _id?: string;
         uid: string;
         email: string;
         role: string[];
@@ -27,6 +28,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
             return;
         }
         req.user = {
+            _id: (user as any)._id.toString(),
             uid: user.uid,
             email: user.email,
             role: user.role || [],

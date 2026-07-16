@@ -2,6 +2,10 @@ import { Router } from "express";
 import { createCrudRoutes } from "./crudRoutes";
 import { services } from "../services";
 import authRouter from "./auth.routes";
+import { authenticate, AuthRequest } from "../core/middleware/auth.middleware";
+import { rateLimit } from "../core/middleware/rateLimit.middleware";
+import { Response, NextFunction } from "express";
+import { v4 as uuidv4 } from "uuid";
 
 const router = Router();
 
@@ -10,7 +14,50 @@ router.use("/auth", authRouter);
 
 // Core entities
 router.use("/users", createCrudRoutes({ service: services.user }));
-router.use("/companies", createCrudRoutes({ service: services.company }));
+
+// Company with auto-set owner/slug and starting team creation
+const companyRouter = createCrudRoutes({ service: services.company });
+companyRouter.post("/", authenticate, rateLimit(), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+        const { name, slug, startingTeams, ...rest } = req.body;
+        if (!req.user?._id) {
+            res.status(401).json({ error: "Authentication required" });
+            return;
+        }
+        const companyData = {
+            ...rest,
+            name,
+            slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
+            owner: req.user._id,
+        };
+        const company = await services.company.create(companyData);
+
+        const teams = Array.isArray(startingTeams) && startingTeams.length > 0
+            ? await Promise.all(startingTeams.map((t: any) =>
+                services.team.create({
+                    uid: uuidv4(),
+                    name: t.name,
+                    slug: t.slug || t.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
+                    company: (company as any)._id,
+                    department: t.department || "executive",
+                } as any)
+            ))
+            : [await services.team.create({
+                uid: uuidv4(),
+                name: `${name} Team`,
+                slug: companyData.slug,
+                company: (company as any)._id,
+                department: "executive",
+            } as any)];
+
+        await services.company.update((company as any)._id, { teams: teams.map((t: any) => t._id) });
+
+        res.status(201).json({ company, teams });
+    } catch (error) {
+        next(error);
+    }
+});
+router.use("/companies", companyRouter);
 router.use("/teams", createCrudRoutes({ service: services.team }));
 router.use("/agents", createCrudRoutes({ service: services.agent }));
 router.use("/agent-memories", createCrudRoutes({ service: services.agentMemory }));
