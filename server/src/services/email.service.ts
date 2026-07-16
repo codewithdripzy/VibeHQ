@@ -21,7 +21,7 @@ type EmailLayoutOptions = {
 
 class EmailService {
   private resend: Resend | null = null;
-  private defaultFrom = "VibeHQ <noreply@vibehq.ai>";
+  private defaultFrom = "VibeHQ <onboarding@resend.dev>";
 
   constructor() {
     const apiKey = process.env.RESEND_API_KEY;
