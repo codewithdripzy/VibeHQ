@@ -171,6 +171,7 @@ const agentSchema = new Schema(
                 "analyst",
                 "data_scientist",
                 "customer_support",
+                "hr",
                 "employee",
             ],
             required: true,

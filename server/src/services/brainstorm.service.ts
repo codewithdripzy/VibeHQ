@@ -4,6 +4,8 @@ import { chat } from "../llm/router";
 import type { LLMMessage } from "../llm/provider";
 import { toolRegistry, ToolResult } from "../tools/registry";
 import { Company } from "../models/company.model";
+import { Team } from "../models/team.model";
+import { Agent } from "../models/agent.model";
 import { cache } from "./cache.service";
 import fs from "fs";
 import path from "path";
@@ -50,7 +52,7 @@ interface BrainstormConfig {
     trigger?: "manual" | "auto" | "scheduled";
     maxDepth?: number;
     maxTurns?: number;
-    timeLimitMinutes?: number;
+    timeLimitMinutes?: number; // default: 1440 (24 hours)
 }
 
 class BrainstormService {
@@ -67,8 +69,10 @@ class BrainstormService {
         if (!company) throw new Error("Company not found");
 
         const sessionId = uuidv4();
+        // Default 24h time limit — sessions should survive server restarts
         const expiresAt = new Date();
-        expiresAt.setMinutes(expiresAt.getMinutes() + (config.timeLimitMinutes || 10));
+        const minutes = config.timeLimitMinutes || 1440; // 24 hours default
+        expiresAt.setMinutes(expiresAt.getMinutes() + minutes);
 
         const session = await BrainstormSession.create({
             uid: sessionId,
@@ -142,12 +146,16 @@ class BrainstormService {
         const commPrompt = this.loadPrompt("communication.txt");
         const basePrompt = this.loadPrompt("base.txt");
 
+        // Load existing teams for delegation context
+        const existingTeams = await this.loadExistingTeams(session.company.toString());
+
         const systemPrompt = this.buildSystemPrompt(
             prompt,
             commPrompt,
             basePrompt,
             company,
-            session
+            session,
+            existingTeams
         );
 
         const messages: LLMMessage[] = [
@@ -562,6 +570,30 @@ class BrainstormService {
                         });
                     }
 
+                    if (action.type === "assemble_team") {
+                        try {
+                            const result = await this.assembleTeam(
+                                session.company.toString(),
+                                action
+                            );
+                            (currentSession as any).chatLog.push({
+                                team: "board",
+                                sender: "System",
+                                content: `✅ **Team "${action.teamName}" created** (${action.department})\nRoles: ${action.roles?.map((r: any) => r.name).join(", ") || "Unspecified"}\nYou can now delegate work to this team.`,
+                                type: "system",
+                                timestamp: new Date(),
+                            });
+                        } catch (err: any) {
+                            (currentSession as any).chatLog.push({
+                                team: "board",
+                                sender: "System",
+                                content: `❌ Failed to create team "${action.teamName}": ${err.message}`,
+                                type: "system",
+                                timestamp: new Date(),
+                            });
+                        }
+                    }
+
                     if (action.type === "complete") {
                         await this.completeSession(sessionId, "completed");
                         return;
@@ -627,7 +659,8 @@ class BrainstormService {
         commPrompt: string,
         basePrompt: string,
         company: any,
-        session: any
+        session: any,
+        existingTeams?: string
     ): string {
         let prompt = brainstormPrompt;
 
@@ -638,6 +671,13 @@ class BrainstormService {
         prompt = prompt.replace(/\{\{company_mission\}\}/g, company.mission || "Not yet defined");
         prompt = prompt.replace(/\{\{company_vision\}\}/g, company.vision || "Not yet defined");
         prompt = prompt.replace(/\{\{company_values\}\}/g, (company.values || []).join(", ") || "Not yet defined");
+        prompt = prompt.replace(/\{\{existing_teams\}\}/g, existingTeams || "No teams exist yet.");
+
+        const now = new Date();
+        prompt = prompt.replace(/\{\{currentYear\}\}/g, String(now.getFullYear()));
+        prompt = prompt.replace(/\{\{currentDate\}\}/g, now.toISOString().split("T")[0]);
+        prompt = prompt.replace(/\{\{currentDay\}\}/g, now.toLocaleDateString("en-US", { weekday: "long" }));
+
         prompt = prompt.replace(/\{\{session_id\}\}/g, session.uid);
         prompt = prompt.replace(/\{\{max_depth\}\}/g, String(session.maxDepth || 5));
         prompt = prompt.replace(/\{\{max_turns\}\}/g, String(session.maxTurns || 30));
@@ -645,7 +685,6 @@ class BrainstormService {
 
         prompt += "\n\n--- COMMUNICATION HIERARCHY ---\n" + commPrompt;
 
-        const now = new Date();
         prompt += `\n\n--- CURRENT DATE & TIME ---\n${now.toISOString()}\nDay: ${now.toLocaleDateString("en-US", { weekday: "long" })}\nDate: ${now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}\nTime: ${now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}\nUse this as the current date for any market research, trends, or time-sensitive analysis.`;
 
         return prompt;
@@ -816,6 +855,73 @@ class BrainstormService {
         } catch (error: any) {
             return { success: false, error: error.message };
         }
+    }
+
+    private async loadExistingTeams(companyId: string): Promise<string> {
+        try {
+            const teams = await Team.find({ company: companyId, deletedAt: null }).lean();
+            if (!teams.length) {
+                return "No teams exist yet. The board should discuss hiring/creating teams before delegating work.";
+            }
+
+            const lines: string[] = [];
+            for (const team of teams) {
+                const agentCount = await Agent.countDocuments({ company: companyId, team: team._id, deletedAt: null });
+                lines.push(`- **${team.name}** (${team.department}) — ${agentCount} agent(s) — ${team.description || "No description"}`);
+            }
+            return "EXISTING TEAMS:\n" + lines.join("\n");
+        } catch (err: any) {
+            console.error(`[Brainstorm] Failed to load existing teams:`, err.message);
+            return "No teams exist yet. The board should discuss hiring/creating teams before delegating work.";
+        }
+    }
+
+    private async assembleTeam(companyId: string, action: any): Promise<{ team: any; agents: any[] }> {
+        const teamName = action.teamName || action.name;
+        const department = action.department || "operations";
+        const description = action.description || "";
+        const roles: any[] = action.roles || [];
+
+        // Create the team
+        const team = await Team.create({
+            uid: uuidv4(),
+            name: teamName,
+            slug: teamName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+            company: companyId,
+            department,
+            description,
+            status: "active",
+        });
+
+        const createdAgents: any[] = [];
+
+        // Create agents for each role specified
+        for (const roleSpec of roles) {
+            const agent = await Agent.create({
+                uid: uuidv4(),
+                name: roleSpec.name,
+                role: roleSpec.role || "employee",
+                rank: roleSpec.rank || "mid_level",
+                company: companyId,
+                team: team._id,
+                status: "idle",
+                systemPrompt: roleSpec.description || `You are a ${roleSpec.name} at the company.`,
+                persona: {
+                    personality: ["collaborative", "reliable"],
+                    workingStyle: roleSpec.description || "Completes assigned work reliably.",
+                    communicationStyle: "Clear and professional.",
+                },
+            });
+            createdAgents.push(agent);
+        }
+
+        // Update team with agents
+        if (createdAgents.length > 0) {
+            team.agents = createdAgents.map((a) => a._id);
+            await team.save();
+        }
+
+        return { team, agents: createdAgents };
     }
 
     private async completeSession(sessionId: string, reason: string) {

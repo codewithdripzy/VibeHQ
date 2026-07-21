@@ -84,7 +84,7 @@ const brainstormSessionSchema = new Schema(
         // Limits
         maxDepth: { type: Number, default: 5 },
         maxTurns: { type: Number, default: 30 },
-        timeLimitMinutes: { type: Number, default: 10 },
+        timeLimitMinutes: { type: Number, default: 1440 },
         turnsUsed: { type: Number, default: 0 },
 
         // Results
@@ -182,6 +182,5 @@ const brainstormSessionSchema = new Schema(
 brainstormSessionSchema.index({ company: 1 });
 brainstormSessionSchema.index({ company: 1, status: 1 });
 brainstormSessionSchema.index({ company: 1, createdAt: -1 });
-brainstormSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export default brainstormSessionSchema;

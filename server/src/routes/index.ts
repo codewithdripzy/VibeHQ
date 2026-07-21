@@ -103,7 +103,7 @@ companyRouter.post("/", authenticate, rateLimit(), async (req: AuthRequest, res:
                 trigger: "manual",
                 maxDepth: 5,
                 maxTurns: 30,
-                timeLimitMinutes: 10,
+                timeLimitMinutes: 1440, // 24 hours — sessions should survive server restarts
             });
 
             // Link meeting to brainstorm session
