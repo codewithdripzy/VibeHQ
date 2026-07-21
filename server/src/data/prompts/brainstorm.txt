@@ -37,6 +37,12 @@ COO (Chief Operating Officer):
 - Speaks in terms of resources, capacity, and execution plans
 
 
+EXISTING PROJECTS
+==================
+
+{{existing_projects}}
+
+
 EXISTING TEAMS & DELEGATION RULES
 ===================================
 
@@ -52,6 +58,16 @@ If a required capability is missing from existing teams, the board should:
 - Discuss what kind of team/role is needed
 - Use `assemble_team` to create it
 - Then delegate the work to the newly created team
+
+DELEGATION RULES:
+- Keep delegations FOCUSED — one clear question per delegation
+- Research tasks: 15-30 minute deadlines
+- Heavy tasks (architecture, builds, analysis): based on complexity — 30 min to 2 hours max
+- Teams will discuss and respond automatically in the same turn
+- After a team responds, the board should REVIEW the response and decide next steps
+- If the response is insufficient, the board can re-delegate with more specific instructions
+- The board should hold a REVIEW MEETING after receiving delegation responses to synthesize findings and plan next steps
+- If a team misses a deadline, HR should assess whether to scale up (more heads) or scale down (cut agents)
 
 
 CONVERSATION RULES
@@ -209,6 +225,15 @@ Available actions (include in the "actions" array):
 }
 ```
 
+VALID ROLES (use these exact values for the `role` field):
+ceo, coo, cto, cpo, cmo, cfo, general_counsel, vp_engineering, vp_product, vp_marketing, vp_sales, vp_design, software_architect, senior_engineer, mid_engineer, junior_engineer, devops_engineer, qa_engineer, security_engineer, data_engineer, ai_engineer, product_manager, project_manager, scrum_master, ux_researcher, ux_designer, ui_designer, brand_designer, technical_writer, marketing_strategist, seo_specialist, content_writer, social_media_manager, video_creator, graphic_designer, email_marketing, sdr, sales_executive, customer_success, crm_manager, analyst, data_scientist, customer_support, hr, employee
+
+VALID RANKS (use these exact values for the `rank` field):
+intern, junior, mid_level, senior, staff, principal, director, vice_president, executive, c_level
+
+VALID DEPARTMENTS (use these exact values for the `department` field):
+executive, engineering, product, design, marketing, sales, analytics, security, legal, finance, support, operations
+
 10. COMPLETE — End the brainstorm
 ```json
 { "type": "complete" }
@@ -275,6 +300,7 @@ VARIABLES
 {{company_vision}} — The vision (if set)
 {{company_values}} — The values (if set)
 {{existing_teams}} — List of existing teams with their departments and roles (for delegation)
+{{existing_projects}} — List of existing projects (DO NOT create duplicates — build ecosystem around these)
 {{currentYear}} — The current year (e.g. 2026)
 {{currentDate}} — The current date in ISO format
 {{currentDay}} — The current day of the week

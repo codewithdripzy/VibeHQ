@@ -6,6 +6,7 @@ import { toolRegistry, ToolResult } from "../tools/registry";
 import { Company } from "../models/company.model";
 import { Team } from "../models/team.model";
 import { Agent } from "../models/agent.model";
+import { Project } from "../models/project.model";
 import { cache } from "./cache.service";
 import fs from "fs";
 import path from "path";
@@ -149,13 +150,17 @@ class BrainstormService {
         // Load existing teams for delegation context
         const existingTeams = await this.loadExistingTeams(session.company.toString());
 
+        // Load existing projects to avoid duplicates
+        const existingProjects = await this.loadExistingProjects(session.company.toString());
+
         const systemPrompt = this.buildSystemPrompt(
             prompt,
             commPrompt,
             basePrompt,
             company,
             session,
-            existingTeams
+            existingTeams,
+            existingProjects
         );
 
         const messages: LLMMessage[] = [
@@ -371,13 +376,14 @@ class BrainstormService {
                     }
 
                     if (action.type === "delegate") {
-                        currentSession.delegations.push({
+                        const delegationObj = {
                             to: action.to,
                             question: action.question,
                             context: action.context || "",
-                            status: "pending",
+                            status: "pending" as const,
                             createdAt: new Date(),
-                        } as any);
+                        };
+                        currentSession.delegations.push(delegationObj as any);
 
                         const docDraft = action.documentDraft;
                         let delegationContent = `**Requesting information from ${action.to}**\n\n`;
@@ -430,10 +436,23 @@ class BrainstormService {
                                     context: action.context || "",
                                     researchDone: "",
                                     specificQuestion: action.question,
-                                    deadline: new Date(Date.now() + 48 * 60 * 60 * 1000),
+                                    deadline: new Date(Date.now() + 4 * 60 * 60 * 1000), // 4 hours max
                                     status: "pending",
                                 };
                             }
+                        }
+
+                        // Auto-generate team response
+                        try {
+                            await this.generateTeamResponse(
+                                currentSession,
+                                delegationObj,
+                                session.company.toString(),
+                                messages,
+                                systemPrompt
+                            );
+                        } catch (err: any) {
+                            console.error(`[Brainstorm] Auto team response failed:`, err.message);
                         }
                     }
 
@@ -660,7 +679,8 @@ class BrainstormService {
         basePrompt: string,
         company: any,
         session: any,
-        existingTeams?: string
+        existingTeams?: string,
+        existingProjects?: string
     ): string {
         let prompt = brainstormPrompt;
 
@@ -672,6 +692,7 @@ class BrainstormService {
         prompt = prompt.replace(/\{\{company_vision\}\}/g, company.vision || "Not yet defined");
         prompt = prompt.replace(/\{\{company_values\}\}/g, (company.values || []).join(", ") || "Not yet defined");
         prompt = prompt.replace(/\{\{existing_teams\}\}/g, existingTeams || "No teams exist yet.");
+        prompt = prompt.replace(/\{\{existing_projects\}\}/g, existingProjects || "No projects exist yet.");
 
         const now = new Date();
         prompt = prompt.replace(/\{\{currentYear\}\}/g, String(now.getFullYear()));
@@ -876,9 +897,440 @@ class BrainstormService {
         }
     }
 
+    private async loadExistingProjects(companyId: string): Promise<string> {
+        try {
+            const projects = await Project.find({ company: companyId, deletedAt: null })
+                .select("name description status priority tags")
+                .lean();
+            if (!projects.length) {
+                return "No projects exist yet. The board should define what to build.";
+            }
+
+            const lines: string[] = [];
+            for (const p of projects) {
+                const statusEmoji: Record<string, string> = {
+                    planning: "📝", active: "🟢", on_hold: "⏸️", completed: "✅", cancelled: "❌",
+                };
+                const emoji = statusEmoji[p.status] || "📋";
+                lines.push(`- ${emoji} **${p.name}** (${p.status}/${p.priority}) — ${p.description?.slice(0, 120) || "No description"}`);
+            }
+            return "EXISTING PROJECTS — DO NOT CREATE DUPLICATES:\n" + lines.join("\n") + "\n\nThe board should explore ways to expand or build an ecosystem around these existing projects rather than creating overlapping ones.";
+        } catch (err: any) {
+            console.error(`[Brainstorm] Failed to load existing projects:`, err.message);
+            return "No projects exist yet.";
+        }
+    }
+
+    private async generateTeamResponse(
+        session: any,
+        delegation: any,
+        companyId: string,
+        messages: LLMMessage[],
+        systemPrompt: string
+    ): Promise<void> {
+        const teamName = delegation.to;
+        const question = delegation.question;
+        const teamRoles = ["Team Lead", "Researcher", "Analyst"];
+
+        // Push typing indicators for team members
+        const activeRoles = teamRoles.slice(0, 2 + Math.floor(Math.random() * 2)); // 2-3 members
+        for (const role of activeRoles) {
+            (session as any).chatLog.push({
+                team: teamName,
+                sender: role,
+                content: `${role} is working on: ${question.slice(0, 60)}...`,
+                type: "typing",
+                typing: true,
+                timestamp: new Date(),
+            });
+        }
+        await session.save();
+
+        const teamPrompt = `You are a member of the ${teamName} team. The board has delegated a task to your team.
+
+DELEGATION QUESTION: ${question}
+
+CONTEXT: ${delegation.context || "N/A"}
+
+Your team is having a discussion to research and answer this question. Multiple team members are contributing in parallel.
+
+RULES:
+1. Each team member should speak from their perspective (Team Lead coordinates, Researcher digs into data, Analyst synthesizes)
+2. Build on what others said — this is a team discussion, not independent reports
+3. Use search if you need data
+4. Each member should contribute UNIQUE insights
+5. After discussing, the Team Lead should synthesize the team's findings into a final response
+
+RESPONSE FORMAT — respond with a JSON object:
+{
+  "conversation": [
+    { "agent": "Team Lead", "message": "coordinate and direct the research" },
+    { "agent": "Researcher", "message": "share findings from research" },
+    { "agent": "Analyst", "message": "analyze data and provide insights" }
+  ],
+  "synthesis": "Team Lead's final synthesis of findings",
+  "resources": [
+    { "type": "document", "name": "Report", "content": "...", "mimeType": "text/markdown" }
+  ]
+}`;
+
+        const teamMessages: LLMMessage[] = [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: teamPrompt },
+        ];
+
+        try {
+            const response = await Promise.race([
+                chat(teamMessages, companyId),
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error("Team LLM call timed out")), 60000)
+                ),
+            ]);
+
+            // Remove all typing indicators for this team
+            const log = (session as any).chatLog;
+            for (const role of activeRoles) {
+                const idx = log.findIndex((m: any) => m.type === "typing" && m.sender === role && m.typing === true);
+                if (idx !== -1) log.splice(idx, 1);
+            }
+
+            // Parse the team response
+            const parsed = this.parseTeamConversation(response.content);
+
+            // Add team conversation to chat log
+            for (const msg of parsed.conversation) {
+                (session as any).chatLog.push({
+                    team: teamName,
+                    sender: msg.agent,
+                    content: msg.message,
+                    type: "message",
+                    timestamp: new Date(),
+                });
+            }
+
+            // Add synthesis as the final response
+            const synthesis = parsed.synthesis || parsed.answer || response.content.slice(0, 500);
+            if (parsed.conversation.length === 0) {
+                // Fallback: add the raw response as a single message
+                (session as any).chatLog.push({
+                    team: teamName,
+                    sender: "Team Lead",
+                    content: synthesis,
+                    type: "response",
+                    resources: parsed.resources || [],
+                    timestamp: new Date(),
+                });
+            } else {
+                (session as any).chatLog.push({
+                    team: teamName,
+                    sender: "Team Lead",
+                    content: `**Team Synthesis:** ${synthesis}`,
+                    type: "response",
+                    resources: parsed.resources || [],
+                    timestamp: new Date(),
+                });
+            }
+
+            // Update delegation status
+            delegation.status = "completed";
+            delegation.response = synthesis;
+            delegation.completedAt = new Date();
+            delegation.resources = parsed.resources || [];
+
+            // Notify board
+            let boardPreview = synthesis.length > 300 ? synthesis.slice(0, 300) + "..." : synthesis;
+            (session as any).chatLog.push({
+                team: "board",
+                sender: "System",
+                content: `📥 **Response from ${teamName}** — ${parsed.conversation.length} team member(s) discussed, ${parsed.resources?.length || 0} deliverable(s)\n\n${boardPreview}`,
+                type: "system",
+                timestamp: new Date(),
+            });
+
+            // Add response to LLM conversation for board context
+            messages.push({
+                role: "user",
+                content: `Team response from ${teamName} (${parsed.conversation.length} members discussed): ${synthesis}`,
+            });
+
+            console.log(`[Brainstorm] Team "${teamName}" responded (${parsed.conversation.length} members, ${response.content.length} chars)`);
+        } catch (error: any) {
+            console.error(`[Brainstorm] Team "${teamName}" failed to respond:`, error.message);
+
+            // Remove all typing indicators
+            const log = (session as any).chatLog;
+            for (const role of activeRoles) {
+                const idx = log.findIndex((m: any) => m.type === "typing" && m.sender === role && m.typing === true);
+                if (idx !== -1) log.splice(idx, 1);
+            }
+
+            // Mark delegation as failed
+            delegation.status = "timeout";
+            delegation.response = `Team failed to respond: ${error.message}`;
+
+            // Trigger HR assessment for capacity issues
+            (session as any).chatLog.push({
+                team: "board",
+                sender: "System",
+                content: `⚠️ **${teamName} failed to respond** — ${error.message}\n\nHR should assess: Does this team need more members, or are there blockers? The board may need to re-delegate or restructure.`,
+                type: "system",
+                timestamp: new Date(),
+            });
+
+            // Add HR escalation message
+            (session as any).chatLog.push({
+                team: "board",
+                sender: "COO",
+                content: `The ${teamName} team missed their deadline. HR — please assess team capacity. Do we need to scale up with more heads, or is this a skill gap that requires a different approach?`,
+                type: "message",
+                timestamp: new Date(),
+            });
+        }
+
+        await session.save();
+    }
+
+    private parseTeamConversation(response: string): { conversation: { agent: string; message: string }[]; synthesis: string; answer: string; resources: any[] } {
+        try {
+            let jsonStr = "";
+            const codeBlockMatch = response.match(/```json\s*([\s\S]+?)\s*```/);
+            if (codeBlockMatch) {
+                jsonStr = codeBlockMatch[1];
+            } else {
+                const firstBrace = response.indexOf("{");
+                if (firstBrace !== -1) {
+                    let depth = 0;
+                    let end = firstBrace;
+                    for (let i = firstBrace; i < response.length; i++) {
+                        if (response[i] === "{") depth++;
+                        if (response[i] === "}") depth--;
+                        if (depth === 0) { end = i + 1; break; }
+                    }
+                    jsonStr = response.substring(firstBrace, end);
+                }
+            }
+
+            if (jsonStr) {
+                const parsed = JSON.parse(jsonStr);
+                return {
+                    conversation: (parsed.conversation || []).map((c: any) => ({
+                        agent: c.agent || c.sender || "Team Member",
+                        message: c.message || c.content || "",
+                    })).filter((c: any) => c.message),
+                    synthesis: parsed.synthesis || "",
+                    answer: parsed.answer || parsed.response || "",
+                    resources: parsed.resources || [],
+                };
+            }
+
+            // Plain text — treat as single message
+            return {
+                conversation: [{ agent: "Team Lead", message: response.slice(0, 1000) }],
+                synthesis: response.slice(0, 1000),
+                answer: response.slice(0, 1000),
+                resources: [],
+            };
+        } catch {
+            return {
+                conversation: [{ agent: "Team Lead", message: response.slice(0, 1000) }],
+                synthesis: response.slice(0, 1000),
+                answer: response.slice(0, 1000),
+                resources: [],
+            };
+        }
+    }
+
+    private mapRole(role: string): string {
+        const validRoles = [
+            "ceo", "coo", "cto", "cpo", "cmo", "cfo", "general_counsel",
+            "vp_engineering", "vp_product", "vp_marketing", "vp_sales", "vp_design",
+            "software_architect", "senior_engineer", "mid_engineer", "junior_engineer",
+            "devops_engineer", "qa_engineer", "security_engineer", "data_engineer", "ai_engineer",
+            "product_manager", "project_manager", "scrum_master",
+            "ux_researcher", "ux_designer", "ui_designer", "brand_designer", "technical_writer",
+            "marketing_strategist", "seo_specialist", "content_writer", "social_media_manager",
+            "video_creator", "graphic_designer", "email_marketing",
+            "sdr", "sales_executive", "customer_success", "crm_manager",
+            "analyst", "data_scientist", "customer_support", "hr", "employee",
+        ];
+        const normalized = role.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+        if (validRoles.includes(normalized)) return normalized;
+
+        // Fuzzy match
+        const fuzzyMap: Record<string, string> = {
+            researcher: "analyst",
+            research: "analyst",
+            data_analyst: "analyst",
+            marketing: "marketing_strategist",
+            market: "marketing_strategist",
+            engineer: "senior_engineer",
+            developer: "senior_engineer",
+            dev: "senior_engineer",
+            designer: "ux_designer",
+            writer: "content_writer",
+            copywriter: "content_writer",
+            manager: "project_manager",
+            lead: "project_manager",
+            team_lead: "project_manager",
+            support: "customer_support",
+            sales: "sales_executive",
+            finance: "cfo",
+            technology: "cto",
+            product: "product_manager",
+            operations: "coo",
+            people: "hr",
+            hr_manager: "hr",
+            quality: "qa_engineer",
+            testing: "qa_engineer",
+            security: "security_engineer",
+            infra: "devops_engineer",
+            infrastructure: "devops_engineer",
+            content: "content_writer",
+            social: "social_media_manager",
+            brand: "brand_designer",
+            ux: "ux_designer",
+            ui: "ui_designer",
+            video: "video_creator",
+            graphic: "graphic_designer",
+            email: "email_marketing",
+            crm: "crm_manager",
+            customer: "customer_success",
+            success: "customer_success",
+            ai: "ai_engineer",
+            machine_learning: "ai_engineer",
+            ml: "ai_engineer",
+            data: "data_engineer",
+            science: "data_scientist",
+            scikit: "data_scientist",
+            legal: "general_counsel",
+            counsel: "general_counsel",
+            architecture: "software_architect",
+            architect: "software_architect",
+            scrum: "scrum_master",
+            agile: "scrum_master",
+            product_owner: "product_manager",
+            po: "product_manager",
+            pm: "project_manager",
+            sdet: "qa_engineer",
+            devsecops: "security_engineer",
+            secops: "security_engineer",
+            growth: "marketing_strategist",
+            seo: "seo_specialist",
+            sem: "seo_specialist",
+            paid: "marketing_strategist",
+            ads: "marketing_strategist",
+            paid_ads: "marketing_strategist",
+        };
+
+        // Try partial match
+        for (const [key, val] of Object.entries(fuzzyMap)) {
+            if (normalized.includes(key) || key.includes(normalized)) return val;
+        }
+
+        return "employee"; // fallback
+    }
+
+    private mapRank(rank: string): string {
+        const validRanks = [
+            "intern", "junior", "mid_level", "senior", "staff", "principal",
+            "director", "vice_president", "executive", "c_level",
+        ];
+        const normalized = rank.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+        if (validRanks.includes(normalized)) return normalized;
+
+        const rankMap: Record<string, string> = {
+            mid: "mid_level",
+            middle: "mid_level",
+            intermediate: "mid_level",
+            lead: "senior",
+            team_lead: "senior",
+            head: "director",
+            director_level: "director",
+            vp: "vice_president",
+            c_level_executive: "c_level",
+            entry: "junior",
+            entry_level: "junior",
+            graduate: "junior",
+            associate: "junior",
+            experienced: "senior",
+            senior_lead: "staff",
+            principal_engineer: "principal",
+            chief: "c_level",
+           CXO: "c_level",
+        };
+
+        for (const [key, val] of Object.entries(rankMap)) {
+            if (normalized === key || normalized.includes(key)) return val;
+        }
+
+        return "mid_level"; // fallback
+    }
+
+    private mapDepartment(dept: string): string {
+        const validDepts = [
+            "executive", "engineering", "product", "design", "marketing",
+            "sales", "analytics", "security", "legal", "finance", "support", "operations",
+        ];
+        const normalized = dept.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+        if (validDepts.includes(normalized)) return normalized;
+
+        const deptMap: Record<string, string> = {
+            research: "analytics",
+            data: "analytics",
+            tech: "engineering",
+            development: "engineering",
+            software: "engineering",
+            dev: "engineering",
+            hr: "operations",
+            people: "operations",
+            culture: "operations",
+            admin: "operations",
+            biz: "sales",
+            business: "sales",
+            revenue: "sales",
+            growth: "marketing",
+            brand: "marketing",
+            content: "marketing",
+            comms: "marketing",
+            communications: "marketing",
+            product_design: "design",
+            ux: "design",
+            ui: "design",
+            creative: "design",
+            visual: "design",
+            legal_compliance: "legal",
+            compliance: "legal",
+            risk: "legal",
+            accounting: "finance",
+            treasury: "finance",
+            procurement: "finance",
+            help: "support",
+            customer_service: "support",
+            cs: "support",
+            cx: "support",
+            quality: "engineering",
+            qa: "engineering",
+            test: "engineering",
+            infra: "engineering",
+            infrastructure: "engineering",
+            platform: "engineering",
+            ai: "engineering",
+            ml: "engineering",
+            data_science: "analytics",
+            bi: "analytics",
+            intelligence: "analytics",
+        };
+
+        for (const [key, val] of Object.entries(deptMap)) {
+            if (normalized.includes(key) || key.includes(normalized)) return val;
+        }
+
+        return "operations"; // fallback
+    }
+
     private async assembleTeam(companyId: string, action: any): Promise<{ team: any; agents: any[] }> {
         const teamName = action.teamName || action.name;
-        const department = action.department || "operations";
+        const department = this.mapDepartment(action.department || "operations");
         const description = action.description || "";
         const roles: any[] = action.roles || [];
 
@@ -894,37 +1346,76 @@ class BrainstormService {
         });
 
         const createdAgents: any[] = [];
+        let leadAgent: any = null;
 
         // Create agents for each role specified
         for (const roleSpec of roles) {
+            const isLead = roles.length === 1 || roleSpec.rank === "lead" || roleSpec.rank === "director" || roleSpec.rank === "senior";
+            const mappedRole = this.mapRole(roleSpec.role || "employee");
+            const mappedRank = this.mapRank(isLead ? "senior" : (roleSpec.rank || "mid_level"));
             const agent = await Agent.create({
                 uid: uuidv4(),
                 name: roleSpec.name,
-                role: roleSpec.role || "employee",
-                rank: roleSpec.rank || "mid_level",
+                role: mappedRole,
+                rank: mappedRank,
                 company: companyId,
                 team: team._id,
                 status: "idle",
                 systemPrompt: roleSpec.description || `You are a ${roleSpec.name} at the company.`,
                 persona: {
-                    personality: ["collaborative", "reliable"],
+                    personality: ["collaborative", "reliable", "leadership"],
                     workingStyle: roleSpec.description || "Completes assigned work reliably.",
                     communicationStyle: "Clear and professional.",
                 },
             });
             createdAgents.push(agent);
+            if (isLead && !leadAgent) leadAgent = agent;
         }
 
-        // Update team with agents
-        if (createdAgents.length > 0) {
-            team.agents = createdAgents.map((a) => a._id);
-            await team.save();
+        // If no roles specified, create a default lead
+        if (createdAgents.length === 0) {
+            const lead = await Agent.create({
+                uid: uuidv4(),
+                name: `${teamName} Lead`,
+                role: "project_manager",
+                rank: "senior",
+                company: companyId,
+                team: team._id,
+                status: "idle",
+                systemPrompt: `You are the team lead for ${teamName}. You manage the team, coordinate work, and report to the board.`,
+                persona: {
+                    personality: ["organized", "leadership", "communicative"],
+                    workingStyle: "Manages team operations and reports to leadership.",
+                    communicationStyle: "Clear, structured, and proactive.",
+                },
+            });
+            createdAgents.push(lead);
+            leadAgent = lead;
         }
+
+        // Update team with agents and lead
+        team.agents = createdAgents.map((a) => a._id);
+        if (leadAgent) {
+            team.lead = leadAgent._id;
+        }
+        await team.save();
 
         return { team, agents: createdAgents };
     }
 
     private async completeSession(sessionId: string, reason: string) {
+        const session = await BrainstormSession.findById(sessionId);
+        if (session) {
+            // Clean up any orphaned typing indicators
+            const log = (session as any).chatLog || [];
+            for (let i = log.length - 1; i >= 0; i--) {
+                if (log[i].type === "typing" && log[i].typing === true) {
+                    log.splice(i, 1);
+                }
+            }
+            await session.save();
+        }
+
         await BrainstormSession.findOneAndUpdate(
             { _id: sessionId },
             {
