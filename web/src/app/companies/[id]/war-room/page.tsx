@@ -142,7 +142,10 @@ function ChatBubble({
   const isSystem = msg.type === "system";
   const isResponse = msg.type === "response";
   const isTyping = msg.type === "typing" && msg.typing;
-  const teamStyle = teamColors[msg.team] || teamColors.board;
+  const isFounder = msg.sender === "Founder";
+  const teamStyle = isFounder
+    ? "bg-sky-500/15 text-sky-400 ring-1 ring-sky-500/20"
+    : teamColors[msg.team] || teamColors.board;
 
   if (isTyping) {
     return (
@@ -216,9 +219,12 @@ function ChatBubble({
   );
 }
 
-function WarRoomDetail({ session }: { session: Session }) {
+function WarRoomDetail({ session, companyId }: { session: Session; companyId: string }) {
   const [activeTab, setActiveTab] = useState("board");
   const [showThinkingLogs, setShowThinkingLogs] = useState(false);
+  const [chimeMessage, setChimeMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const { toast } = useToast();
 
   // Extract unique teams from chatLog, preserving order, board first
   const teams = Array.from(new Set(session.chatLog.map((m) => m.team)));
@@ -244,6 +250,52 @@ function WarRoomDetail({ session }: { session: Session }) {
       setActiveTab(team);
     }
   };
+
+  const handleChimeIn = async () => {
+    if (!chimeMessage.trim() || sending) return;
+    setSending(true);
+    try {
+      await entityService.create(`brainstorm/${session.uid}/message`, {
+        message: chimeMessage.trim(),
+        companyId,
+      });
+      // Optimistically add the message to chatLog
+      session.chatLog.push({
+        team: "board",
+        sender: "Founder",
+        content: chimeMessage.trim(),
+        type: "message",
+        timestamp: new Date().toISOString(),
+      });
+      setChimeMessage("");
+      toast("Message sent to the board", "success");
+    } catch {
+      toast("Failed to send message", "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleNudge = async () => {
+    try {
+      await entityService.create(`brainstorm/${session.uid}/message`, {
+        message: "⚠️ FOUNDER NUDGE: The conversation seems to be stalling. Please make concrete decisions and create tasks for any action items. Stop discussing and start executing.",
+        companyId,
+      });
+      session.chatLog.push({
+        team: "board",
+        sender: "Founder",
+        content: "⚠️ Nudge: Stop discussing and start executing. Create tasks.",
+        type: "message",
+        timestamp: new Date().toISOString(),
+      });
+      toast("Nudge sent — board will refocus", "success");
+    } catch {
+      toast("Failed to send nudge", "error");
+    }
+  };
+
+  const isRunning = session.status === "running";
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -294,6 +346,45 @@ function WarRoomDetail({ session }: { session: Session }) {
           ))
         )}
       </div>
+
+      {/* Chime-in bar — only for running sessions on the board tab */}
+      {isRunning && activeTab === "board" && (
+        <div className="px-3 py-2 border-t border-white/5 bg-black/30">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={chimeMessage}
+                onChange={(e) => setChimeMessage(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleChimeIn()}
+                placeholder="Chime into the conversation..."
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-[11px] text-white placeholder-gray-600 focus:outline-none focus:border-white/20 transition-colors"
+                disabled={sending}
+              />
+            </div>
+            <button
+              onClick={handleChimeIn}
+              disabled={!chimeMessage.trim() || sending}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-[10px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {sending ? (
+                <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              ) : (
+                <Icon icon="lucide:send" className="w-3 h-3" />
+              )}
+              Send
+            </button>
+            <button
+              onClick={handleNudge}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-[10px] font-medium transition-colors"
+              title="Nudge the board to stop talking and start executing"
+            >
+              <Icon icon="lucide:pointer" className="w-3 h-3" />
+              Nudge
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Footer info */}
       <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between text-[9px] text-gray-600">
@@ -505,7 +596,7 @@ export default function WarRoomPage() {
       {/* Detail area */}
       <div className="flex-1 min-w-0 flex flex-col">
         {selectedSession ? (
-          <WarRoomDetail session={selectedSession} />
+          <WarRoomDetail session={selectedSession} companyId={companyId} />
         ) : showAutoStartPrompt ? (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-600 p-8">
             <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-4">

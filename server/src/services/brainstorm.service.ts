@@ -7,6 +7,8 @@ import { Company } from "../models/company.model";
 import { Team } from "../models/team.model";
 import { Agent } from "../models/agent.model";
 import { Project } from "../models/project.model";
+import { Task } from "../models/task.model";
+import { Notification } from "../models/notification.model";
 import { cache } from "./cache.service";
 import fs from "fs";
 import path from "path";
@@ -613,6 +615,55 @@ class BrainstormService {
                         }
                     }
 
+                    if (action.type === "create_task") {
+                        try {
+                            const task = await this.createTask(
+                                session.company.toString(),
+                                action,
+                                currentSession
+                            );
+                            (currentSession as any).chatLog.push({
+                                team: "board",
+                                sender: "System",
+                                content: `📋 **Task created: "${task.title}"**\nAssigned to: ${action.team || "Unassigned"} | Priority: ${action.priority || "medium"} | Est: ${action.estimatedHours || "?"}h`,
+                                type: "system",
+                                timestamp: new Date(),
+                            });
+                        } catch (err: any) {
+                            (currentSession as any).chatLog.push({
+                                team: "board",
+                                sender: "System",
+                                content: `❌ Failed to create task "${action.title}": ${err.message}`,
+                                type: "system",
+                                timestamp: new Date(),
+                            });
+                        }
+                    }
+
+                    if (action.type === "create_project") {
+                        try {
+                            const project = await this.createProject(
+                                session.company.toString(),
+                                action
+                            );
+                            (currentSession as any).chatLog.push({
+                                team: "board",
+                                sender: "System",
+                                content: `🚀 **Project created: "${project.name}"**\nStatus: Planning | Priority: ${action.priority || "medium"}`,
+                                type: "system",
+                                timestamp: new Date(),
+                            });
+                        } catch (err: any) {
+                            (currentSession as any).chatLog.push({
+                                team: "board",
+                                sender: "System",
+                                content: `❌ Failed to create project "${action.name}": ${err.message}`,
+                                type: "system",
+                                timestamp: new Date(),
+                            });
+                        }
+                    }
+
                     if (action.type === "complete") {
                         await this.completeSession(sessionId, "completed");
                         return;
@@ -652,9 +703,34 @@ class BrainstormService {
 
             // Build next prompt with current state
             const stateSummary = this.buildStateSummary(currentSession);
+            let nextPrompt = `Current brainstorm state:\n${stateSummary}\n\nContinue the brainstorm. What should we explore next? Use search when you need data. Delegate when you need specialized knowledge. Synthesize when you have enough.`;
+
+            // Stagnation detection — if conversation is looping, push for progress
+            if (this.detectStagnation((currentSession as any).chatLog)) {
+                nextPrompt += `\n\n⚠️ STAGNATION DETECTED: The conversation is looping. The same agents are repeating similar points. BREAK THE LOOP:
+- If you've discussed enough: move to SYNTHESIS with concrete decisions
+- If you need data: DELEGATE to a team or USE SEARCH
+- If you've decided something: CREATE TASKS to execute it
+- If you're stuck: the CEO should call for a VOTE or make a DECISION
+Do NOT repeat the same points. Every message must add NEW information or move to action.`;
+                console.log(`[Brainstorm] Stagnation detected at turn ${turns}, injecting progress prompt`);
+            }
+
+            // Check for user-injected messages
+            const freshSession = await BrainstormSession.findById(sessionId);
+            const userMsgs = ((freshSession as any).chatLog || []).filter(
+                (m: any) => m.sender === "Founder" && m.type === "message" && !messages.some(
+                    (existing: any) => existing.role === "user" && existing.content.includes(m.content.slice(0, 50))
+                )
+            );
+            for (const userMsg of userMsgs) {
+                nextPrompt += `\n\n🔴 FOUNDER INPUT: "${userMsg.sender}: ${userMsg.content}"\nRespond to the founder's direction. Adjust the brainstorm accordingly.`;
+                console.log(`[Brainstorm] Injecting founder message into conversation`);
+            }
+
             messages.push({
                 role: "user",
-                content: `Current brainstorm state:\n${stateSummary}\n\nContinue the brainstorm. What should we explore next? Use search when you need data. Delegate when you need specialized knowledge. Synthesize when you have enough.`,
+                content: nextPrompt,
             });
         } catch (error: any) {
             console.error(`Brainstorm turn ${turns} failed:`, error.message);
@@ -1413,6 +1489,116 @@ Discuss this as a team. Each member contributes their perspective, then the Team
         return { team, agents: createdAgents };
     }
 
+    private async createTask(companyId: string, action: any, session: any): Promise<any> {
+        const teamName = action.team;
+        let teamId = null;
+        let assigneeId = null;
+
+        if (teamName) {
+            const team = await Team.findOne({ company: companyId, name: teamName, deletedAt: null });
+            if (team) {
+                teamId = team._id;
+                // Find a suitable agent in the team
+                const agentQuery: any = { company: companyId, team: team._id, deletedAt: null };
+                if (action.assigneeRole) {
+                    agentQuery.role = this.mapRole(action.assigneeRole);
+                }
+                const agent = await Agent.findOne(agentQuery).sort({ "performance.currentScore": -1 });
+                if (agent) assigneeId = agent._id;
+            }
+        }
+
+        const task = await Task.create({
+            uid: uuidv4(),
+            title: action.title,
+            description: action.description || "",
+            company: companyId,
+            team: teamId,
+            assignee: assigneeId,
+            priority: action.priority || "medium",
+            estimatedHours: action.estimatedHours || 4,
+            tags: action.tags || [],
+            status: "queued",
+        });
+
+        return task;
+    }
+
+    private async createProject(companyId: string, action: any): Promise<any> {
+        const slug = action.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        const teamIds: any[] = [];
+
+        if (action.teamNames?.length) {
+            for (const name of action.teamNames) {
+                const team = await Team.findOne({ company: companyId, name, deletedAt: null });
+                if (team) teamIds.push(team._id);
+            }
+        }
+
+        const project = await Project.create({
+            uid: uuidv4(),
+            name: action.name,
+            slug,
+            description: action.description || "",
+            company: companyId,
+            teams: teamIds,
+            status: "planning",
+            priority: action.priority || "medium",
+            tags: action.tags || [],
+        });
+
+        return project;
+    }
+
+    private detectStagnation(chatLog: any[]): boolean {
+        if (chatLog.length < 10) return false;
+
+        // Check last 10 messages — if >60% are from same 2 agents saying similar things, it's stagnation
+        const recent = chatLog.slice(-10).filter((m: any) => m.type === "message");
+        if (recent.length < 6) return false;
+
+        const senderCounts: Record<string, number> = {};
+        for (const msg of recent) {
+            senderCounts[msg.sender] = (senderCounts[msg.sender] || 0) + 1;
+        }
+
+        // If 2 or fewer agents dominate (>70% of messages), it's a loop
+        const sorted = Object.entries(senderCounts).sort((a, b) => b[1] - a[1]);
+        const topSenders = sorted.slice(0, 2);
+        const topCount = topSenders.reduce((sum, [, count]) => sum + count, 0);
+        if (topCount / recent.length > 0.7 && sorted.length <= 3) return true;
+
+        // Check for repeated phrases (simple n-gram check)
+        const lastContents = recent.map((m: any) => m.content.toLowerCase().slice(0, 80));
+        let repeats = 0;
+        for (let i = 0; i < lastContents.length; i++) {
+            for (let j = i + 1; j < lastContents.length; j++) {
+                if (lastContents[i] === lastContents[j]) repeats++;
+            }
+        }
+        if (repeats >= 3) return true;
+
+        return false;
+    }
+
+    async injectUserMessage(sessionUid: string, companyId: string, userId: string, message: string): Promise<any> {
+        const session = await BrainstormSession.findOne({ uid: sessionUid, company: companyId });
+        if (!session) throw new Error("Session not found");
+        if (session.status !== "running") throw new Error("Session is not running");
+
+        // Add user message to chat log
+        (session as any).chatLog.push({
+            team: "board",
+            sender: "Founder",
+            content: message,
+            type: "message",
+            timestamp: new Date(),
+        });
+        await session.save();
+
+        return { success: true, message: "Message injected into conversation" };
+    }
+
     private async completeSession(sessionId: string, reason: string) {
         const session = await BrainstormSession.findById(sessionId);
         if (session) {
@@ -1424,6 +1610,47 @@ Discuss this as a team. Each member contributes their perspective, then the Team
                 }
             }
             await session.save();
+
+            // Send meeting summary notification to the company owner
+            try {
+                const company = await Company.findById(session.company);
+                const summary = (session as any).summary;
+                const taskCount = await Task.countDocuments({ company: session.company, deletedAt: null });
+                const projectCount = await Project.countDocuments({ company: session.company, deletedAt: null });
+                const teamCount = await Team.countDocuments({ company: session.company, deletedAt: null });
+
+                let summaryText = `Board meeting completed (${reason}).\n`;
+                summaryText += `${(session as any).chatLog?.length || 0} messages exchanged across ${new Set((session as any).chatLog?.map((m: any) => m.team) || []).size} team tabs.\n`;
+                summaryText += `${taskCount} task(s), ${projectCount} project(s), ${teamCount} team(s) in company.`;
+
+                if (summary?.recommendation) {
+                    summaryText += `\n\nRecommendation: ${summary.recommendation}`;
+                }
+                if (summary?.nextSteps?.length) {
+                    summaryText += `\nNext steps: ${summary.nextSteps.slice(0, 5).join("; ")}`;
+                }
+
+                // Find the founder/owner user
+                if (company && (company as any).owner) {
+                    await Notification.create({
+                        uid: uuidv4(),
+                        company: session.company,
+                        recipient: (company as any).owner,
+                        recipientType: "user",
+                        type: "system",
+                        title: `Board Meeting Complete — ${company.name}`,
+                        message: summaryText,
+                        entityType: "brainstormSession",
+                        entityId: session._id,
+                        senderType: "system",
+                        actionUrl: `/companies/${session.company}/war-room`,
+                        actionLabel: "View Meeting",
+                    });
+                    console.log(`[Brainstorm] Meeting summary notification sent for session ${session.uid}`);
+                }
+            } catch (err: any) {
+                console.error(`[Brainstorm] Failed to send meeting summary notification:`, err.message);
+            }
         }
 
         await BrainstormSession.findOneAndUpdate(

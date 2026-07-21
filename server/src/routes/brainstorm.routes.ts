@@ -109,4 +109,35 @@ router.patch("/:uid/cancel", authenticate, async (req: AuthRequest, res: Respons
     }
 });
 
+// Inject a user message into an active brainstorm session
+router.post("/:uid/message", authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+        const { message } = req.body;
+        if (!message?.trim()) {
+            res.status(400).json({ error: "message is required" });
+            return;
+        }
+        if (!req.user?._id) {
+            res.status(401).json({ error: "Authentication required" });
+            return;
+        }
+
+        const companyId = (req.user as any).companyId || req.body.companyId;
+        if (!companyId) {
+            res.status(400).json({ error: "companyId is required" });
+            return;
+        }
+
+        const result = await brainstormService.injectUserMessage(
+            req.params.uid,
+            companyId,
+            req.user._id.toString(),
+            message.trim()
+        );
+        res.json({ data: result });
+    } catch (error) {
+        next(error);
+    }
+});
+
 export default router;
