@@ -84,7 +84,7 @@ class BrainstormService {
             initiatedBy: config.userId,
             maxDepth: config.maxDepth || 5,
             maxTurns: config.maxTurns || 30,
-            timeLimitMinutes: config.timeLimitMinutes || 10,
+            timeLimitMinutes: config.timeLimitMinutes || 1440,
             expiresAt,
             questions: [],
         });
@@ -926,7 +926,7 @@ class BrainstormService {
         delegation: any,
         companyId: string,
         messages: LLMMessage[],
-        systemPrompt: string
+        _systemPrompt: string
     ): Promise<void> {
         const teamName = delegation.to;
         const question = delegation.question;
@@ -946,46 +946,55 @@ class BrainstormService {
         }
         await session.save();
 
-        const teamPrompt = `You are a member of the ${teamName} team. The board has delegated a task to your team.
+        const teamSystemPrompt = `You are a specialist team at a company. You have been delegated a task by the board of directors.
 
-DELEGATION QUESTION: ${question}
-
-CONTEXT: ${delegation.context || "N/A"}
-
-Your team is having a discussion to research and answer this question. Multiple team members are contributing in parallel.
+Your team has three members who will discuss the task together:
+- **Team Lead**: Coordinates the effort, sets direction, synthesizes findings into a final response
+- **Researcher**: Investigates, gathers data, and shares findings
+- **Analyst**: Analyzes information, draws insights, and provides recommendations
 
 RULES:
-1. Each team member should speak from their perspective (Team Lead coordinates, Researcher digs into data, Analyst synthesizes)
-2. Build on what others said — this is a team discussion, not independent reports
-3. Use search if you need data
-4. Each member should contribute UNIQUE insights
-5. After discussing, the Team Lead should synthesize the team's findings into a final response
+1. Each team member speaks from their role's perspective
+2. Build on what others said — this is a collaborative team discussion
+3. Be specific and practical — avoid vague or generic statements
+4. After all members contribute, the Team Lead provides a synthesis
+5. If you need data, use the search capability
 
-RESPONSE FORMAT — respond with a JSON object:
+RESPONSE FORMAT — respond ONLY with a valid JSON object, no text before or after:
 {
   "conversation": [
     { "agent": "Team Lead", "message": "coordinate and direct the research" },
     { "agent": "Researcher", "message": "share findings from research" },
     { "agent": "Analyst", "message": "analyze data and provide insights" }
   ],
-  "synthesis": "Team Lead's final synthesis of findings",
+  "synthesis": "Team Lead's final synthesis combining all findings into a clear, actionable response to the delegation question",
   "resources": [
-    { "type": "document", "name": "Report", "content": "...", "mimeType": "text/markdown" }
+    { "type": "document", "name": "Report", "content": "Full report content here", "mimeType": "text/markdown" }
   ]
 }`;
 
+        const teamUserPrompt = `DELEGATION FROM THE BOARD:
+
+QUESTION: ${question}
+
+CONTEXT: ${delegation.context || "N/A"}
+
+Discuss this as a team. Each member contributes their perspective, then the Team Lead synthesizes into a final response.`;
+
         const teamMessages: LLMMessage[] = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: teamPrompt },
+            { role: "system", content: teamSystemPrompt },
+            { role: "user", content: teamUserPrompt },
         ];
 
         try {
+            console.log(`[Brainstorm] Team "${teamName}" calling LLM (${activeRoles.length} members)...`);
             const response = await Promise.race([
                 chat(teamMessages, companyId),
                 new Promise<never>((_, reject) =>
                     setTimeout(() => reject(new Error("Team LLM call timed out")), 60000)
                 ),
             ]);
+            console.log(`[Brainstorm] Team "${teamName}" LLM responded (${response.content.length} chars)`);
 
             // Remove all typing indicators for this team
             const log = (session as any).chatLog;
@@ -996,6 +1005,7 @@ RESPONSE FORMAT — respond with a JSON object:
 
             // Parse the team response
             const parsed = this.parseTeamConversation(response.content);
+            console.log(`[Brainstorm] Team "${teamName}" parsed: ${parsed.conversation.length} messages, synthesis: ${parsed.synthesis ? parsed.synthesis.length : 0} chars`);
 
             // Add team conversation to chat log
             for (const msg of parsed.conversation) {
@@ -1055,7 +1065,7 @@ RESPONSE FORMAT — respond with a JSON object:
 
             console.log(`[Brainstorm] Team "${teamName}" responded (${parsed.conversation.length} members, ${response.content.length} chars)`);
         } catch (error: any) {
-            console.error(`[Brainstorm] Team "${teamName}" failed to respond:`, error.message);
+            console.error(`[Brainstorm] Team "${teamName}" failed to respond:`, error.message, error.stack?.split('\n').slice(0, 3).join('\n'));
 
             // Remove all typing indicators
             const log = (session as any).chatLog;
